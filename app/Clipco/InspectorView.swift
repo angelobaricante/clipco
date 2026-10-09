@@ -116,6 +116,47 @@ struct CreatorControls: View {
     @FocusState private var editing: Bool
 
     var body: some View {
+        if model.showingLibrary {
+            LabeledContent("Projects", value: clip.projects.isEmpty ? "Library only"
+                                                                    : clip.projects.map(\.name).joined(separator: ", "))
+                .help("Notes and exclusions belong to each Project; open one to change them")
+        } else {
+            projectControls
+        }
+        Toggle(isOn: Binding(get: { clip.reuseAllowed },
+                             set: { allowed in Task { await model.setReuse(clip, allowed) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Allow reuse across projects")
+                Text(clip.reuseAllowed ? "Its B-roll segments can be suggested for other videos."
+                                       : "Only its own Projects can use it. Applies in every Project.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.switch)
+        LabeledContent("Segment roles", value: clip.roleSummary.text)
+        ForEach(clip.unmatchedRoleCorrections, id: \.self) { kept in
+            Label("Your \(SegmentRole.name(kept.role)) choice for \(kept.start.timecode)–\(kept.end.timecode) "
+                  + "no longer matches a segment after re-analysis. Choose the role again below.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
+        ForEach(clip.unmatchedToneCorrections, id: \.self) { kept in
+            Label("Your tones (\(kept.tones.isEmpty ? "none" : kept.tones.joined(separator: ", "))) for "
+                  + "\(kept.start.timecode)–\(kept.end.timecode) no longer match a segment after re-analysis. "
+                  + "Choose them again below.", systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
+        if clip.projects.count > 1 && !model.showingLibrary {
+            LabeledContent("Also in") {
+                Text(clip.projects.filter { $0.projectId != model.project?.id }.map(\.name)
+                    .joined(separator: ", "))
+            }
+            .help("One shared analysis; each Project keeps its own note and exclusion")
+        }
+    }
+
+    /// The open Project's own note and exclusion for this clip.
+    @ViewBuilder private var projectControls: some View {
         EvidenceGroup(title: "Creator note", symbol: "note.text", note: "your words, shared with Codex") {
             TextField("Note", text: $draft, prompt: Text("Context the editing agent should know"), axis: .vertical)
                 .lineLimit(2...6)
@@ -148,30 +189,6 @@ struct CreatorControls: View {
             }
         }
         .toggleStyle(.switch)
-        Toggle(isOn: Binding(get: { clip.reuseAllowed },
-                             set: { allowed in Task { await model.setReuse(clip, allowed) } })) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Allow reuse across projects")
-                Text(clip.reuseAllowed ? "Its B-roll segments can be suggested for other videos."
-                                       : "Only its own Projects can use it. Applies in every Project.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .toggleStyle(.switch)
-        LabeledContent("Segment roles", value: clip.roleSummary.text)
-        ForEach(clip.unmatchedRoleCorrections, id: \.self) { kept in
-            Label("Your \(SegmentRole.name(kept.role)) choice for \(kept.start.timecode)–\(kept.end.timecode) "
-                  + "no longer matches a segment after re-analysis. Choose the role again below.",
-                  systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
-        }
-        if clip.projects.count > 1 {
-            LabeledContent("Also in") {
-                Text(clip.projects.filter { $0.projectId != model.project?.id }.map(\.name)
-                    .joined(separator: ", "))
-            }
-            .help("One shared analysis; each Project keeps its own note and exclusion")
-        }
     }
 
     private func save() {
@@ -202,6 +219,18 @@ struct ContextSection: View {
 
     var body: some View {
         CreatorControls(clip: clip).id(clip.id)
+        if clip.segments.contains(where: { $0.tone.state == "not_analyzed" }) {
+            HStack {
+                Text("Emotional tone not analyzed for \(clip.segments.filter { $0.tone.state == "not_analyzed" }.count) "
+                     + "of \(clip.segments.count) segments.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Read Emotional Tone") { Task { await model.enrichTone([clip]) } }
+                    .disabled(!model.canEnrichTone([clip]))
+                    .help("Ask the local model for this clip's tone from its saved frames and transcript; "
+                          + "nothing is re-transcribed")
+            }
+        }
         Divider()
         if clip.segments.isEmpty {
             Text("No saved context yet.").foregroundStyle(.secondary)
@@ -220,6 +249,7 @@ struct ContextSection: View {
                         .accessibilityLabel("Play from \(segment.start.timecode) to \(segment.end.timecode)")
                 }
                 SegmentRolePicker(segment: segment)
+                SegmentToneView(segment: segment)
                 EvidenceGroup(title: "Model interpretation", symbol: "sparkles",
                               note: segment.interpretation.model) {
                     Text(segment.interpretation.text)
@@ -296,6 +326,55 @@ struct SegmentRolePicker: View {
             if segment.role.effective == "mixed" || segment.role.effective == "needs_review" {
                 Text("Not offered for reuse until you choose a role.").font(.caption).foregroundStyle(.orange)
             }
+        }
+    }
+}
+
+/// Suggested emotional tones with their grounds, and the creator's own tones kept apart from them.
+struct SegmentToneView: View {
+    @Environment(AppModel.self) private var model
+    let segment: Segment
+
+    var body: some View {
+        let tone = segment.tone
+        EvidenceGroup(title: "Emotional tone", symbol: "heart.text.square",
+                      note: tone.model.map { "interpreted by \($0) from sampled evidence" }) {
+            HStack {
+                Text(tone.summary).fontWeight(tone.state == "creator" ? .semibold : .regular)
+                    .foregroundStyle(tone.state == "not_analyzed" ? .secondary : .primary)
+                Spacer()
+                Menu("Tones") {
+                    ForEach(SegmentTone.vocabulary, id: \.self) { name in
+                        Toggle(name.capitalized, isOn: Binding(
+                            get: { tone.tones.contains(name) },
+                            set: { on in
+                                let chosen = SegmentTone.vocabulary.filter { $0 == name ? on : tone.tones.contains($0) }
+                                Task { await model.setTones(chosen, for: segment) }
+                            }))
+                    }
+                    Divider()
+                    Button("No Tone") { Task { await model.setTones([], for: segment) } }
+                    Button("Use Suggested") { Task { await model.setTones(nil, for: segment) } }
+                        .disabled(tone.creator == nil)
+                }
+                .fixedSize()
+                .accessibilityLabel("Emotional tones from \(segment.start.timecode) to \(segment.end.timecode)")
+            }
+            if tone.creator != nil {
+                Text("Set by you. Suggested: " + (tone.suggested.isEmpty ? "none"
+                                                  : tone.suggested.map(\.tone).joined(separator: ", ")))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(tone.suggested, id: \.tone) { s in
+                Text("\(s.tone.capitalized): \(s.explanation)").font(.caption)
+            }
+            ForEach(tone.connotations, id: \.idea) { c in
+                Text("Could stand for “\(c.idea)”: \(c.explanation)").font(.caption)
+            }
+            if let depicted = tone.depictedEmotion, !depicted.isEmpty {
+                Text("Shown by a person: \(depicted)").font(.caption).foregroundStyle(.secondary)
+            }
+            Text(tone.limitations).font(.caption2).foregroundStyle(.tertiary)
         }
     }
 }

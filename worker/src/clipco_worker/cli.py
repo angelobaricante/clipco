@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import roles
+from . import roles, tone
 from .pipeline import Worker
 from .readiness import check, warm_up
 from .retrieval import SEARCH_PAGE, Index, default_home
@@ -79,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--segment", required=True)
     p.add_argument("--role", required=True, choices=[*roles.ROLES, "suggested"],
                    help='"suggested" clears the correction')
+    p = sub.add_parser("set-segment-tones", help="record the creator's emotional tones for a Segment")
+    p.add_argument("--segment", required=True)
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--tones", help=f"comma-separated, from: {', '.join(tone.VOCABULARY)}; empty for none")
+    group.add_argument("--suggested", action="store_true", help="clear the correction")
+    p = sub.add_parser("enrich-tone", help="read emotional tone from saved evidence for clips that have none yet")
+    destination(p)
+    p.add_argument("clip_ids", nargs="*", help="default: every clip in the Project or library")
     p = sub.add_parser("set-excluded", help="exclude clips from, or restore them to, default search results")
     p.add_argument("--project", required=True)
     p.add_argument("--excluded", required=True, choices=["yes", "no"])
@@ -107,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=SEARCH_PAGE)
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--include-excluded", action="store_true", help="also match clips the creator excluded")
+    p.add_argument("--tone", help="only Segments with this emotional tone (never footage not yet analysed for tone)")
     args = parser.parse_args(argv)
     if getattr(args, "library", False):
         args.project = None
@@ -119,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "search":
             emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset,
                                                              include_excluded=args.include_excluded,
-                                                             scope=args.scope))
+                                                             scope=args.scope, tone_filter=args.tone))
         elif args.command == "readiness":
             emit("result", readiness=check(ollama, args.whisper_model, args.vad_model))
         elif args.command == "warmup":
@@ -148,6 +157,15 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "set-segment-role":
                 emit("result", segment_id=args.segment, role=worker.store.set_segment_role(
                     args.segment, None if args.role == "suggested" else args.role))
+            elif args.command == "set-segment-tones":
+                tones = None if args.suggested else [t.strip() for t in args.tones.split(",") if t.strip()]
+                emit("result", segment_id=args.segment, tone=worker.store.set_segment_tones(args.segment, tones))
+            elif args.command == "enrich-tone":
+                started = time.monotonic()
+                clip_ids = [worker.store.resolve_clip(c, args.project) for c in args.clip_ids] or None
+                outcome = worker.enrich_tone(args.project, clip_ids,
+                                             progress=lambda stage, detail: emit("progress", stage=stage, **detail))
+                emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))
             elif args.command == "delete-project":
                 worker.delete_project(args.project)
                 emit("result", deleted=args.project)

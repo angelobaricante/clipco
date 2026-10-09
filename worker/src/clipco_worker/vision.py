@@ -11,6 +11,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tone import ToneRequest
 
 
 class InferenceError(Exception):
@@ -201,17 +205,26 @@ class OllamaVision:
         return {"engine": "ollama", "model": self.model, "digest": self._digest}
 
     def describe(self, request: SegmentRequest) -> dict:
-        images = [base64.b64encode(f.path.read_bytes()).decode() for f in request.frames]
+        return self._chat(SCHEMA, SYSTEM_PROMPT, build_prompt(request), request.frames)
+
+    def describe_tone(self, request: "ToneRequest") -> dict:
+        """Suggested emotional tone for one Segment from its saved frames, observations and transcript."""
+        from . import tone
+
+        return self._chat(tone.SCHEMA, tone.SYSTEM_PROMPT, tone.build_prompt(request), request.frames)
+
+    def _chat(self, schema: dict, system: str, prompt: str, frames: list[FrameItem]) -> dict:
+        images = [base64.b64encode(f.path.read_bytes()).decode() for f in frames]
         body = {
             "model": self.model,
             "stream": False,
             "think": False,
-            "format": SCHEMA,
+            "format": schema,
             "keep_alive": "30m",
             "options": {"temperature": 0, "num_ctx": 8192},
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_prompt(request), "images": images},
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt, "images": images},
             ],
         }
         content = self._post("/api/chat", body)["message"]["content"]

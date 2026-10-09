@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from . import media, roles
+from . import media, roles, tone
 from .retrieval import Index, live_status
 from .speech import TranscriptSpan
 from .store import SourceRemoved, Store
@@ -139,12 +139,15 @@ def frame_times(start: float, end: float, per_segment: int) -> list[float]:
 
 
 class Worker:
-    def __init__(self, home: Path, speech, vision, recipe: dict | None = None):
+    def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = True):
         self.home = Path(home)
         self.store = Store(self.home / "index.sqlite")
         self.speech = speech
         self.vision = vision
         self.recipe = recipe or RECIPE
+        # A new analysis (import or re-analysis) also reads its Segments' emotional tone. Footage analysed before
+        # tone existed is upgraded only when the creator asks (enrich_tone).
+        self.tone_on_import = tone_on_import
 
     def create_project(self, name: str, context: str = "") -> dict:
         return self.store.create_project(new_id("prj"), name.strip(), context.strip())
@@ -263,6 +266,11 @@ class Worker:
                  "vision": self.vision.identity, "started_at": started, "finished_at": time.time()},
                 result["segments"],
             )
+            if self.tone_on_import:
+                try:
+                    self._read_tones(clip_id, report)
+                except InferenceError as e:  # the analysis is published; its tone stays Not analyzed
+                    report("tone_failed", {"clip_id": clip_id, "error": str(e)})
             report("ready", {"clip_id": clip_id, "reused": False, "revision": revision})
             return {"clip_id": clip_id, "reused": False, "revision": revision}
         except SourceRemoved:
@@ -315,6 +323,66 @@ class Worker:
             except Exception:
                 continue  # recorded on the clip; the others carry on
         return self._outcome(clip_ids)
+
+    def enrich_tone(self, project_id: str | None, clip_ids: list[str] | None = None,
+                    progress: Progress | None = None) -> dict:
+        """Read emotional tone for chosen clips (default: every clip of the Project, or of the library) whose
+        Segments have none yet, one clip after another. Only saved evidence is used: the cached sampled frames,
+        their observations and the transcript, so nothing is re-transcribed or re-described. Clips that are not
+        ready are skipped (their saved context may not describe the footage); nothing else is upgraded."""
+        report = progress or (lambda stage, detail: None)
+        if clip_ids is None:
+            if project_id is not None and self.store.project(project_id) is None:
+                raise ValueError(f"unknown project {project_id}")
+            clip_ids = [c["id"] for c in (self.store.library_clips() if project_id is None
+                                           else self.store.clips(project_id))]
+        for clip_id in clip_ids:
+            self._require(project_id, clip_id)
+        for clip_id in clip_ids:
+            if self.store.clip(clip_id)["status"] != "ready":
+                report("tone_skipped", {"clip_id": clip_id, "reason": "not ready"})
+                continue
+            try:
+                self._read_tones(clip_id, report)
+            except ServiceUnavailable:
+                raise  # nothing can be read now; what was saved so far stays saved
+            except (InferenceError, OSError) as e:
+                report("tone_failed", {"clip_id": clip_id, "error": str(e)})
+        return self._outcome(clip_ids)
+
+    def _read_tones(self, clip_id: str, report: Progress) -> None:
+        """Ask the model for each not-yet-read Segment's tone from saved evidence, saving each as it completes."""
+        clip = self.store.clip(clip_id)
+        pending = [s for s in self.store.review_clip(clip_id)["segments"] if s["tone"]["analyzed_at"] is None]
+        for i, seg in enumerate(pending):
+            report("reading_tone", {"clip_id": clip_id, "segment": i + 1, "of": len(pending)})
+            # The model sees short local IDs; code maps its citations back to the saved evidence IDs.
+            lines = {f"t{n + 1}": t for n, t in enumerate(seg["transcript"])}
+            seen = {f"f{n + 1}": o for n, o in enumerate(seg["observations"])}
+            request = tone.ToneRequest(
+                original_filename=clip["original_filename"], start=seg["start"], end=seg["end"],
+                transcript=[TranscriptItem(k, t["start"], t["end"], t["text"]) for k, t in lines.items()],
+                frames=[FrameItem(k, o["frame"]["time"], Path(o["frame"]["path"])) for k, o in seen.items()],
+                observations={k: o["text"] for k, o in seen.items()})
+            for f in request.frames:
+                if not f.path.is_file():
+                    raise InferenceError(f"sampled frame {f.path.name} is no longer in Clipco's cache; "
+                                         "re-analyse the clip to read its tone")
+            local = {k: t["id"] for k, t in lines.items()} | {k: o["frame"]["id"] for k, o in seen.items()}
+            reading = self._validated_tone(request, set(local))
+            for item in reading.tones + reading.connotations:
+                item["evidence_ids"] = [local[r] for r in item["evidence_ids"]]
+            self.store.save_tone(seg["id"], reading, tone.TONE_RECIPE, self.vision.identity)
+
+    def _validated_tone(self, request: tone.ToneRequest, known: set[str], attempts: int = 2) -> tone.ToneReading:
+        for attempt in range(attempts):
+            try:
+                return tone.validate(self.vision.describe_tone(request), known)
+            except ServiceUnavailable:
+                raise
+            except InferenceError:
+                if attempt == attempts - 1:
+                    raise
 
     def check_sources(self, project_id: str | None, progress: Progress | None = None) -> dict:
         """Re-verify every analysed clip against its original and the current analysis settings. A missing

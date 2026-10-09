@@ -24,7 +24,9 @@ enum AutomationRun {
     ///     [-ClipcoAutomationNote "text"] [-ClipcoAutomationExclude YES|NO] [-ClipcoAutomationSearch "query"]
     ///     [-ClipcoAutomationMode list] [-ClipcoAutomationTab context|transcript|info] [-ClipcoAutomationHold 8]
     static func review(_ model: AppModel, clipNamed name: String, out: URL, defaults: UserDefaults) async {
-        var report: [String: Any] = ["project": model.project?.name ?? NSNull()]
+        // `-ClipcoAutomationLibrary YES` reviews the clip in the Reusable B-roll library view instead.
+        if defaults.bool(forKey: "ClipcoAutomationLibrary") { await model.openLibrary() }
+        var report: [String: Any] = ["project": model.project?.name ?? NSNull(), "library_view": model.showingLibrary]
         guard let clip = model.clips.first(where: { $0.originalFilename == name }) else {
             report["error"] = "no clip named \(name)"
             write(report, to: out)
@@ -62,6 +64,16 @@ enum AutomationRun {
             let role = String(change[change.index(after: colon)...])
             await model.setRole(role == "suggested" ? nil : role, for: current.segments[index])
         }
+        // `-ClipcoAutomationTones <segment index>:<tone,tone|none|suggested>` goes through the inspector's Tones menu
+        // call.
+        if let change = defaults.string(forKey: "ClipcoAutomationTones"), let colon = change.firstIndex(of: ":"),
+           let index = Int(change[..<colon]), let current = model.clips.first(where: { $0.id == clip.id }),
+           current.segments.indices.contains(index) {
+            let choice = String(change[change.index(after: colon)...])
+            let tones: [String]? = choice == "suggested" ? nil : choice == "none" ? []
+                : choice.split(separator: ",").map(String.init)
+            await model.setTones(tones, for: current.segments[index])
+        }
         let after = model.clips.first { $0.id == clip.id }
         report["after"] = ["note": after?.note?.text ?? NSNull(), "excluded": after?.excluded ?? NSNull(),
                            "selected": model.selection == [clip.id]]
@@ -73,13 +85,21 @@ enum AutomationRun {
             return "\(range) \(segment.role.effective) (suggested \(segment.role.suggested), "
                 + "creator \(segment.role.creator ?? "none"))"
         }
+        library["segment_tones"] = (after?.segments ?? []).map { (segment: Segment) -> String in
+            "\(segment.start.timecode)–\(segment.end.timecode) \(segment.tone.state): \(segment.tone.summary) "
+                + "(suggested \(segment.tone.suggested.map(\.tone).joined(separator: ",")), "
+                + "creator \(segment.tone.creator?.joined(separator: ",") ?? "none"))"
+        }
+        library["reusable_clips"] = model.visibleClips.map(\.originalFilename)
         report["library"] = library
         report["counts"] = Dictionary(uniqueKeysWithValues: FootageFilter.allCases.map { ($0.rawValue, model.count($0)) })
         if let query = defaults.string(forKey: "ClipcoAutomationSearch") {
             model.searchText = query
             await model.search()
             report["search"] = model.searchResults?.results.map {
-                ["file": $0.originalFilename, "basis": $0.evidenceBasis, "excluded": $0.excluded]
+                ["file": $0.originalFilename, "basis": $0.evidenceBasis, "excluded": $0.excluded,
+                 "range": "\($0.start.timecode)–\($0.end.timecode)", "fit": $0.fit?.kind ?? NSNull(),
+                 "fit_explanation": $0.fit?.explanation ?? NSNull(), "tones": $0.tone?.tones ?? []]
             } ?? []
         }
         model.browserMode = defaults.string(forKey: "ClipcoAutomationMode") == "list" ? .list : .grid

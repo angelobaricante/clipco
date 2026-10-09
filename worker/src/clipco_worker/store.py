@@ -10,7 +10,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from . import relationships, roles
+from . import relationships, roles, tone
 
 # Bump with a migration step when the index's ownership model changes.
 LIBRARY_VERSION = 1
@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS segments (
 CREATE TABLE IF NOT EXISTS segment_roles (
   clip_id TEXT NOT NULL REFERENCES source_clips(id), start REAL NOT NULL, end_ REAL NOT NULL,
   role TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY (clip_id, start, end_)
+);
+-- One saved emotional-tone reading per Segment (absent: Not analyzed); the creator's tones are kept apart, keyed
+-- by source range like role corrections.
+CREATE TABLE IF NOT EXISTS tone_analyses (
+  segment_id TEXT PRIMARY KEY REFERENCES segments(id), clip_id TEXT NOT NULL REFERENCES source_clips(id),
+  tones TEXT NOT NULL, connotations TEXT NOT NULL, depicted_emotion TEXT NOT NULL, rejected_refs TEXT NOT NULL,
+  recipe TEXT NOT NULL, model TEXT NOT NULL, analyzed_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tone_corrections (
+  clip_id TEXT NOT NULL REFERENCES source_clips(id), start REAL NOT NULL, end_ REAL NOT NULL,
+  tones TEXT NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY (clip_id, start, end_)
 );
 CREATE TABLE IF NOT EXISTS transcript_spans (
   id TEXT PRIMARY KEY, segment_id TEXT NOT NULL REFERENCES segments(id), ordinal INTEGER NOT NULL,
@@ -392,6 +403,36 @@ class Store:
                 "creator_updated_at": creator["updated_at"] if creator else None,
                 "effective": roles.effective(seg["role"], creator["role"] if creator else None)}
 
+    def save_tone(self, segment_id: str, reading, recipe: dict, model: dict) -> bool:
+        """Save a Segment's tone reading. Returns False, saving nothing, if the Segment was replaced or removed
+        while it was being read (its evidence is no longer current)."""
+        with self._transaction():
+            seg = self.db.execute("SELECT clip_id FROM segments WHERE id=?", (segment_id,)).fetchone()
+            if seg is None:
+                return False
+            self.db.execute("INSERT OR REPLACE INTO tone_analyses VALUES (?,?,?,?,?,?,?,?,?)", (
+                segment_id, seg["clip_id"], json.dumps(reading.tones), json.dumps(reading.connotations),
+                reading.depicted_emotion, json.dumps(reading.rejected_refs), json.dumps(recipe), json.dumps(model),
+                time.time()))
+            return True
+
+    def set_segment_tones(self, segment_id: str, tones: list[str] | None) -> dict:
+        """Record (or clear, with None) the creator's tones for a Segment; an empty list says it has none. Kept
+        beside the model's suggestions, which are never rewritten, and keyed by the Segment's source range."""
+        unknown = [t for t in tones or [] if t not in tone.VOCABULARY]
+        if unknown:
+            raise ValueError(f"unknown tone {unknown[0]!r}; use one of {', '.join(tone.VOCABULARY)}")
+        seg = self.db.execute("SELECT * FROM segments WHERE id=?", (segment_id,)).fetchone()
+        if seg is None:
+            raise ValueError(f"unknown segment {segment_id}")
+        key = (seg["clip_id"], seg["start"], seg["end_"])
+        if tones is None:
+            self.db.execute("DELETE FROM tone_corrections WHERE clip_id=? AND start=? AND end_=?", key)
+        else:
+            self.db.execute("INSERT OR REPLACE INTO tone_corrections VALUES (?,?,?,?,?)",
+                            (*key, json.dumps(list(dict.fromkeys(tones))), time.time()))
+        return tone.read(self.db, seg)
+
     # Removal: originals are never touched
 
     def _delete_segments(self, clip_id: str) -> None:
@@ -399,6 +440,7 @@ class Store:
         for (seg_id,) in db.execute("SELECT id FROM segments WHERE clip_id=?", (clip_id,)).fetchall():
             db.execute("DELETE FROM relationships WHERE a_segment=? OR b_segment=?", (seg_id, seg_id))
             db.execute("DELETE FROM observations WHERE segment_id=?", (seg_id,))
+            db.execute("DELETE FROM tone_analyses WHERE segment_id=?", (seg_id,))
             db.execute("DELETE FROM frames WHERE segment_id=?", (seg_id,))
             db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
         db.execute("DELETE FROM segments WHERE clip_id=?", (clip_id,))
@@ -406,7 +448,7 @@ class Store:
     def _delete_context(self, clip_id: str) -> None:
         """Delete one source's analysed context rows (inside a caller's transaction)."""
         self._delete_segments(clip_id)
-        for table in ("analyses", "retired_segments", "segment_roles"):
+        for table in ("analyses", "retired_segments", "segment_roles", "tone_corrections"):
             self.db.execute(f"DELETE FROM {table} WHERE clip_id=?", (clip_id,))
 
     def remove_memberships(self, project_id: str, clip_ids: list[str]) -> None:
@@ -504,6 +546,7 @@ class Store:
                                    "rejected_refs": json.loads(s["rejected_refs"]),
                                    "model": vision.get("model")},
                 "role": self._role(s),
+                "tone": tone.read(db, s),
             })
         clip["role_summary"] = roles.summary([s["role"]["effective"] for s in clip["segments"]])
         # Corrections made for Segment ranges a later re-analysis no longer has: kept and shown, never dropped.
@@ -512,7 +555,14 @@ class Store:
             {"start": r["start"], "end": r["end_"], "role": r["role"], "updated_at": r["updated_at"]}
             for r in db.execute("SELECT * FROM segment_roles WHERE clip_id=? ORDER BY start", (clip["id"],))
             if (r["start"], r["end_"]) not in ranges]
+        clip["unmatched_tone_corrections"] = [
+            {"start": r["start"], "end": r["end_"], "tones": json.loads(r["tones"]), "updated_at": r["updated_at"]}
+            for r in db.execute("SELECT * FROM tone_corrections WHERE clip_id=? ORDER BY start", (clip["id"],))
+            if (r["start"], r["end_"]) not in ranges]
         return clip
+
+    def review_clip(self, clip_id: str) -> dict:
+        return self._clip_review(self.clip(clip_id))
 
     def snapshot(self, project_id: str) -> dict:
         clips = []
