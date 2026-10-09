@@ -139,13 +139,14 @@ def frame_times(start: float, end: float, per_segment: int) -> list[float]:
 
 
 class Worker:
-    def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = False):
+    def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = True):
         self.home = Path(home)
         self.store = Store(self.home / "index.sqlite")
         self.speech = speech
         self.vision = vision
         self.recipe = recipe or RECIPE
-        # Tone is read only when the creator asks (enrich_tone); tests may also read it as part of a new analysis.
+        # A new analysis (import or re-analysis) also reads its Segments' emotional tone. Footage analysed before
+        # tone existed is upgraded only when the creator asks (enrich_tone).
         self.tone_on_import = tone_on_import
 
     def create_project(self, name: str, context: str = "") -> dict:

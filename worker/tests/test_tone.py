@@ -118,7 +118,6 @@ def two_projects_and_standalone(home, tmp_path):
     for name, seconds in (("glass-drip.mp4", 7.0), ("kettle.mp4", 5.0)):
         worker.import_clip(morning, make_clip(own / name, seconds=seconds, audio=False))
     worker.import_clip(None, make_clip(tmp_path / "sunrise.mp4", seconds=8.0, audio=False))
-    worker.enrich_tone(None)  # the creator asks for the whole library's tone
     return home, tutorial, morning
 
 
@@ -136,6 +135,8 @@ def test_library_discovery_ranks_by_suitability_and_emotional_fit_with_a_modest_
     assert "a-roll.mp4" not in names(calm_water)
     # Comparable candidates: the requesting Project's own footage comes first, from either side.
     assert names(calm_water)[0] == "glass-drip.mp4" and calm_water[0]["fit"]["current_project"] is True
+    # Tone was read as part of each clip's analysis: no separate enrichment step was needed.
+    assert {r["tone"]["state"] for r in calm_water} == {"suggested"}
     from_tutorial = names(library(home, query="calm water", project_id=tutorial)["results"])
     assert from_tutorial.index("broll-2-drip.mp4") < from_tutorial.index("glass-drip.mp4")
 
