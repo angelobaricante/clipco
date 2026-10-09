@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Start, stop, or check everything the Clipcon demo needs on this Mac.
+# Start, stop, or check everything the Clipco demo needs on this Mac.
 #
-#   scripts/clipcon start    local-only Ollama, worker deps, warm vision model, build + open the app
-#   scripts/clipcon stop     quit the app, unload the model, stop the Ollama this script started
-#   scripts/clipcon status   show what is running and whether analysis is ready
-#   scripts/clipcon offline-proof [--sandbox] --project ID CLIP [--query TEXT]...
+#   scripts/clipco start    local-only Ollama, worker deps, warm vision model, build + open the app
+#   scripts/clipco stop     quit the app, unload the model, stop the Ollama this script started
+#   scripts/clipco status   show what is running and whether analysis is ready
+#   scripts/clipco offline-proof [--sandbox] --project ID CLIP [--query TEXT]...
 #                            restart Ollama cold, index CLIP live with networking off, search it, save a report
 #                            (--sandbox denies non-loopback network to Ollama and the worker via sandbox-exec
 #                            instead of turning the Mac's networking off: a process-level proof only)
@@ -13,17 +13,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE="$HOME/.clipcon"
+STATE="$HOME/.clipco"
 LOGS="$STATE/logs"
 RUN="$STATE/run"
 BUILD="$STATE/build"
 OLLAMA_ADDR="127.0.0.1:11434"
-VISION_MODEL="${CLIPCON_VISION_MODEL:-qwen3.5:4b-q4_K_M}"
-WHISPER_MODEL="${CLIPCON_WHISPER_MODEL:-$STATE/models/ggml-large-v3-turbo.bin}"
-VAD_MODEL="${CLIPCON_VAD_MODEL:-$STATE/models/ggml-silero-v5.1.2.bin}"
-BUNDLE_ID="com.angelobaricante.clipcon"
-APP="$BUILD/Build/Products/Debug/Clipcon.app"
-WORKER="$ROOT/worker/.venv/bin/clipcon-worker"
+VISION_MODEL="${CLIPCO_VISION_MODEL:-qwen3.5:4b-q4_K_M}"
+WHISPER_MODEL="${CLIPCO_WHISPER_MODEL:-$STATE/models/ggml-large-v3-turbo.bin}"
+VAD_MODEL="${CLIPCO_VAD_MODEL:-$STATE/models/ggml-silero-v5.1.2.bin}"
+BUNDLE_ID="com.angelobaricante.clipco"
+APP="$BUILD/Build/Products/Debug/Clipco.app"
+WORKER="$ROOT/worker/.venv/bin/clipco-worker"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 mkdir -p "$LOGS" "$RUN"
@@ -75,23 +75,23 @@ start_worker() {
 }
 
 start_app() {
-  if pgrep -f "$APP/Contents/MacOS/Clipcon" >/dev/null; then
+  if pgrep -f "$APP/Contents/MacOS/Clipco" >/dev/null; then
     say "App" "already open"
     open "$APP"
     return
   fi
   if command -v xcodegen >/dev/null; then (cd "$ROOT/app" && xcodegen generate --quiet); fi
   say "App" "building (log: $LOGS/build.log)"
-  xcodebuild -project "$ROOT/app/Clipcon.xcodeproj" -scheme Clipcon -configuration Debug \
+  xcodebuild -project "$ROOT/app/Clipco.xcodeproj" -scheme Clipco -configuration Debug \
     -derivedDataPath "$BUILD" build >"$LOGS/build.log" 2>&1 || fail "build failed; see $LOGS/build.log"
   say "App" "opening"
   open "$APP"
 }
 
 stop_all() {
-  if pgrep -f "Clipcon.app/Contents/MacOS/Clipcon" >/dev/null; then
+  if pgrep -f "Clipco.app/Contents/MacOS/Clipco" >/dev/null; then
     say "App" "quitting"
-    osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || pkill -f "Clipcon.app/Contents/MacOS/Clipcon" || true
+    osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || pkill -f "Clipco.app/Contents/MacOS/Clipco" || true
   fi
   if ollama_up; then
     say "Model" "unloading $VISION_MODEL"
@@ -117,8 +117,8 @@ status() {
   else
     say "Worker" "not set up (run start)"
   fi
-  pgrep -f "Clipcon.app/Contents/MacOS/Clipcon" >/dev/null && say "App" "open" || say "App" "closed"
-  local mcp; mcp="$(pgrep -f clipcon-mcp | wc -l | tr -d ' ')"
+  pgrep -f "Clipco.app/Contents/MacOS/Clipco" >/dev/null && say "App" "open" || say "App" "closed"
+  local mcp; mcp="$(pgrep -f clipco-mcp | wc -l | tr -d ' ')"
   say "Codex MCP" "$mcp helper process(es) running (Codex starts these on demand)"
 }
 
@@ -158,5 +158,5 @@ case "${1:-}" in
   stop) stop_all; say "Stopped." ;;
   status) status ;;
   offline-proof) shift; offline_proof "$@" ;;
-  *) echo "usage: scripts/clipcon start | stop | status | offline-proof [--sandbox] --project ID CLIP" >&2; exit 2 ;;
+  *) echo "usage: scripts/clipco start | stop | status | offline-proof [--sandbox] --project ID CLIP" >&2; exit 2 ;;
 esac

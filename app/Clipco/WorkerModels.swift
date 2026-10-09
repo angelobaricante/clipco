@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mirrors the worker's JSON-lines contract (`clipcon-worker`). Keys arrive snake_case.
+/// Mirrors the worker's JSON-lines contract (`clipco-worker`). Keys arrive snake_case.
 
 struct Readiness: Decodable, Equatable, Sendable {
     enum State: String, Decodable, Sendable {
@@ -117,7 +117,7 @@ struct SegmentRole: Decodable, Hashable, Sendable {
     }
 }
 
-/// Written by the creator in Clipcon, about the whole Source clip; kept apart from model output.
+/// Written by the creator in Clipco, about the whole Source clip; kept apart from model output.
 struct CreatorNote: Decodable, Hashable, Sendable {
     var text: String
     var updatedAt: Double
@@ -174,7 +174,7 @@ struct Segment: Decodable, Identifiable, Hashable, Sendable {
     var relationships: [RelatedSegment]
 }
 
-/// Result of the app's Codex connection check: a real MCP session with clipcon-mcp.
+/// Result of the app's Codex connection check: a real MCP session with clipco-mcp.
 struct McpStatus: Decodable, Equatable, Sendable {
     struct Codex: Decodable, Equatable, Sendable {
         var path: String?
@@ -197,7 +197,7 @@ struct McpStatus: Decodable, Equatable, Sendable {
     var overviewMs: Int?
     var codex: Codex
 
-    /// Codex has a `clipcon` server, but it launches something other than this installation.
+    /// Codex has a `clipco` server, but it launches something other than this installation.
     var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }
 }
 

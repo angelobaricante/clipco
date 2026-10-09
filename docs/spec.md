@@ -1,4 +1,4 @@
-# Clipcon — macOS MVP
+# Clipco — macOS MVP
 
 Status: ready-for-agent
 
@@ -110,11 +110,11 @@ Five read-only MCP tools let Codex discover relevant segments, inspect evidence 
 
 ## Further Notes
 
-The creator approved the product/workflow, exact initial runtime candidate, MCP contract, Variant D direction, testing boundary, fallback priorities, and six-task granularity through the planning conversation. Planning decisions are recorded in the completed planning decisions; vocabulary is defined in the [domain glossary](https://github.com/angelobaricante/clipcon/blob/main/GLOSSARY.md).
+The creator approved the product/workflow, exact initial runtime candidate, MCP contract, Variant D direction, testing boundary, fallback priorities, and six-task granularity through the planning conversation. Planning decisions are recorded in the completed planning decisions; vocabulary is defined in the [domain glossary](https://github.com/angelobaricante/clipco/blob/main/GLOSSARY.md).
 
-The approved design reference is [Variant D's native design notes](https://github.com/angelobaricante/clipcon/blob/main/docs/design/macos-design-notes.md). The primary-source prototype is captured on local branch `prototype/footage-review-flow`, commit `317f2f14773f392feab8a189157a06e73f39764b`. It contains sample media illustrations and is not production app source.
+The approved design reference is [Variant D's native design notes](https://github.com/angelobaricante/clipco/blob/main/docs/design/macos-design-notes.md). The primary-source prototype is captured on local branch `prototype/footage-review-flow`, commit `317f2f14773f392feab8a189157a06e73f39764b`. It contains sample media illustrations and is not production app source.
 
 The screenshot states October 10 at 10 AM as the cutoff; Asia/Manila is the planning timezone, subject to the organizer's authoritative deadline. At 4:42 PM on October 9, that interpretation leaves roughly 17 hours 18 minutes. Refresh this calculation at build start and preserve submission buffer. No product implementation, runtime installation, model download, or inference benchmark has yet been completed.
 
-Runtime versions, supported formats, exact quality limitations, model licenses, and measured results must be recorded as implementation evidence. Disclose AI coding tools and any reused code/assets as required by the supplied hackathon rules. Preparing submission material does not itself authorize publishing a repository or submitting on the creator's behalf. The creator selected the public angelobaricante/clipcon repository. GitHub issues are the authoritative implementation tracker; local planning files preserve the approved decision history.
+Runtime versions, supported formats, exact quality limitations, model licenses, and measured results must be recorded as implementation evidence. Disclose AI coding tools and any reused code/assets as required by the supplied hackathon rules. Preparing submission material does not itself authorize publishing a repository or submitting on the creator's behalf. The creator selected the public angelobaricante/clipco repository. GitHub issues are the authoritative implementation tracker; local planning files preserve the approved decision history.
 

@@ -178,7 +178,7 @@ class Worker:
         self.store.remove_memberships(project_id, clip_ids)
 
     def remove_from_library(self, clip_ids: list[str]) -> list[str]:
-        """Forget sources everywhere: their saved context, Project memberships and Clipcon's frame cache.
+        """Forget sources everywhere: their saved context, Project memberships and Clipco's frame cache.
         The original video files stay untouched. Returns the Projects they were removed from."""
         projects = self.store.remove_from_library(clip_ids)
         for clip_id in clip_ids:

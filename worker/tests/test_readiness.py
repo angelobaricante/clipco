@@ -1,5 +1,5 @@
-from clipcon_worker.readiness import check, warm_up
-from clipcon_worker.vision import InferenceError, ServiceUnavailable
+from clipco_worker.readiness import check, warm_up
+from clipco_worker.vision import InferenceError, ServiceUnavailable
 
 MODEL = "qwen3.5:4b-q4_K_M"
 
@@ -98,7 +98,7 @@ def test_failed_warm_up_is_an_inference_failure(tmp_path):
 
 
 def test_non_loopback_or_cloud_inference_is_refused(tmp_path):
-    from clipcon_worker.vision import OllamaVision
+    from clipco_worker.vision import OllamaVision
 
     whisper = tmp_path / "ggml-small.en.bin"
     vad = tmp_path / "ggml-silero-v5.1.2.bin"

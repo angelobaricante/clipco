@@ -9,7 +9,7 @@ from test_creator_controls import clips_by_name, worker_cli
 from test_mcp import call, payload
 from test_project import A_ROLL, B_ROLL, corpus, line_project
 
-from clipcon_worker.pipeline import Worker
+from clipco_worker.pipeline import Worker
 
 
 def originals(folder: Path) -> dict[str, str]:
@@ -22,7 +22,7 @@ def overview(home: Path, pid: str) -> dict:
 
 
 def test_a_failed_clip_is_retried_in_place_without_disturbing_the_rest(home, tmp_path):
-    from clipcon_worker.vision import ServiceUnavailable
+    from clipco_worker.vision import ServiceUnavailable
 
     folder = corpus(tmp_path / "shoot")
     before = originals(folder)
@@ -88,7 +88,7 @@ def test_a_missing_original_is_reported_everywhere_and_restored_without_losing_c
     elsewhere.mkdir()
     moved = Path(shutil.move(folder / "broll-1-pour.mp4", elsewhere / "pour-take-2.mp4"))
 
-    # Before Clipcon re-checks anything, MCP already refuses to treat the cached description as accessible media.
+    # Before Clipco re-checks anything, MCP already refuses to treat the cached description as accessible media.
     state, found, media = (payload(r) for r in call(
         home, ("get_project_overview", {"project_id": pid}),
         ("search_footage", {"project_id": pid, "query": "murky water jug"}),
@@ -206,7 +206,7 @@ def test_changed_analysis_settings_mark_context_stale_until_it_is_refreshed(home
     assert found["results"] and all(r["status"] == "stale" and r["status_note"] for r in found["results"])
 
     a_roll = clips_by_name(worker, pid)["a-roll.mp4"]["id"]
-    from clipcon_worker.vision import ServiceUnavailable
+    from clipco_worker.vision import ServiceUnavailable
 
     def down(request):
         raise ServiceUnavailable("Ollama is not running")

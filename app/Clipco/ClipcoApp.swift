@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct ClipconApp: App {
+struct ClipcoApp: App {
     @State private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("Clipcon") {
+        WindowGroup("Clipco") {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)

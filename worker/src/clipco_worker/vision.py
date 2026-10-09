@@ -160,7 +160,7 @@ class OllamaVision:
         """Core inference must stay on this Mac: loopback host only, no Ollama cloud models."""
         hostname = self.host.rsplit(":", 1)[0].strip("[]")
         if hostname not in LOOPBACK_HOSTS:
-            raise ServiceUnavailable(f"Refusing non-loopback Ollama host {self.host}; Clipcon only uses local inference")
+            raise ServiceUnavailable(f"Refusing non-loopback Ollama host {self.host}; Clipco only uses local inference")
         if "cloud" in self.model.split(":")[-1]:
             raise ServiceUnavailable(f"Refusing Ollama cloud model {self.model}; choose a locally downloaded model")
 

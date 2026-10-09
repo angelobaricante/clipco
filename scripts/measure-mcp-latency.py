@@ -2,7 +2,7 @@
 
   worker/.venv/bin/python scripts/measure-mcp-latency.py PROJECT_ID "query" [PROJECT_ID "query"]...
 
-Reads the index only (CLIPCON_HOME or the app's default). Prints server start-up plus handshake time,
+Reads the index only (CLIPCO_HOME or the app's default). Prints server start-up plus handshake time,
 then each tool call's latency over 5 repeats and the size of what it returned.
 """
 
@@ -15,8 +15,8 @@ from pathlib import Path
 
 from mcp import Client, StdioServerParameters
 
-HOME = os.environ.get("CLIPCON_HOME", str(Path.home() / "Library/Application Support/Clipcon"))
-SERVER = str(Path(sys.executable).parent / "clipcon-mcp")
+HOME = os.environ.get("CLIPCO_HOME", str(Path.home() / "Library/Application Support/Clipco"))
+SERVER = str(Path(sys.executable).parent / "clipco-mcp")
 REPEATS = 5
 
 

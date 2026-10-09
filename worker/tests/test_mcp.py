@@ -9,13 +9,13 @@ from conftest import SPANS, RecordedSpeech, RecordedVision
 
 from mcp import Client, StdioServerParameters
 
-from clipcon_worker.pipeline import Worker
+from clipco_worker.pipeline import Worker
 
-SERVER = Path(sys.executable).parent / "clipcon-mcp"
+SERVER = Path(sys.executable).parent / "clipco-mcp"
 
 
 def call(home: Path, *calls: tuple[str, dict]) -> list:
-    """Start clipcon-mcp as Codex would and run tool calls in one session."""
+    """Start clipco-mcp as Codex would and run tool calls in one session."""
 
     async def run():
         params = StdioServerParameters(command=str(SERVER), args=["--home", str(home)])
@@ -68,8 +68,8 @@ def test_overview_lists_projects_then_one_projects_inventory(home, clip):
 def test_search_returns_a_bounded_grounded_page_with_continuation_and_honest_empty_sets(home, tmp_path):
     from conftest import make_clip
 
-    from clipcon_worker.pipeline import RECIPE
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.pipeline import RECIPE
+    from clipco_worker.speech import TranscriptSpan
 
     spans = [TranscriptSpan(i * 2.0, i * 2.0 + 1.8, f"Step {i + 1}: rinse the filter cartridge.") for i in range(7)]
     spans.append(TranscriptSpan(14.0, 15.8, "Actually, I mean the upper tank, not the chamber."))
@@ -115,8 +115,8 @@ def test_search_returns_a_bounded_grounded_page_with_continuation_and_honest_emp
 def test_segment_context_expands_surrounding_transcript_with_evidence_kinds_and_provenance(home, tmp_path):
     from conftest import make_clip
 
-    from clipcon_worker.pipeline import RECIPE
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.pipeline import RECIPE
+    from clipco_worker.speech import TranscriptSpan
 
     spans = [TranscriptSpan(0.0, 3.0, "First, fill the upper chamber."),
              TranscriptSpan(3.5, 6.0, "Actually, I mean the upper tank, not the chamber."),
@@ -271,7 +271,7 @@ def test_stdout_carries_only_protocol_messages(home, clip):
                           "get_segment_preview", "resolve_media"}
     assert all(t["annotations"]["readOnlyHint"] is True for t in tools.values())
     assert not by_id[3]["result"].get("isError")
-    assert "clipcon-mcp" in stderr
+    assert "clipco-mcp" in stderr
 
 
 def test_the_apps_connection_check_runs_a_real_mcp_session_and_reports_codex_setup(home, clip, tmp_path):
@@ -280,13 +280,13 @@ def test_the_apps_connection_check_runs_a_real_mcp_session_and_reports_codex_set
     import subprocess
 
     project, _ = imported(home, clip)
-    fake_codex = tmp_path / "codex"  # stands in for an installed Codex without Clipcon registered
+    fake_codex = tmp_path / "codex"  # stands in for an installed Codex without Clipco registered
     fake_codex.write_text("#!/bin/sh\n[ \"$1\" = --version ] && echo 'codex-cli 9.9.9' && exit 0\n"
-                          "echo \"Error: No MCP server named 'clipcon' found.\" >&2; exit 1\n")
+                          "echo \"Error: No MCP server named 'clipco' found.\" >&2; exit 1\n")
     fake_codex.chmod(0o755)
 
-    proc = subprocess.run([str(SERVER.with_name("clipcon-worker")), "--home", str(home), "mcp-status"],
-                          capture_output=True, text=True, env={**os.environ, "CLIPCON_CODEX": str(fake_codex)})
+    proc = subprocess.run([str(SERVER.with_name("clipco-worker")), "--home", str(home), "mcp-status"],
+                          capture_output=True, text=True, env={**os.environ, "CLIPCO_CODEX": str(fake_codex)})
 
     status = json.loads(proc.stdout.splitlines()[-1])["mcp"]
     assert status["ok"] is True
@@ -294,7 +294,7 @@ def test_the_apps_connection_check_runs_a_real_mcp_session_and_reports_codex_set
                                "get_segment_preview", "resolve_media"]
     assert status["project_count"] == 1
     assert status["server_command"] == [str(SERVER), "--home", str(home)]
-    assert status["add_command"] == f"codex mcp add clipcon -- {shlex.quote(str(SERVER))} --home {shlex.quote(str(home))}"
+    assert status["add_command"] == f"codex mcp add clipco -- {shlex.quote(str(SERVER))} --home {shlex.quote(str(home))}"
     assert status["codex"] == {"path": str(fake_codex), "version": "codex-cli 9.9.9", "registered": False,
                                "registered_command": None, "error": None}
     assert status["sdk_version"] and status["protocol_version"]

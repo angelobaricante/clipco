@@ -8,7 +8,7 @@ from pathlib import Path
 from test_mcp import call, payload
 from test_project import line_project
 
-WORKER = Path(sys.executable).parent / "clipcon-worker"
+WORKER = Path(sys.executable).parent / "clipco-worker"
 
 
 def worker_cli(home: Path, *args: str) -> dict:
@@ -60,7 +60,7 @@ def test_search_finds_footage_by_what_only_the_creator_noted(home, tmp_path):
 
 
 def test_an_excluded_clip_leaves_new_default_searches_until_it_is_included_again(home, tmp_path):
-    from clipcon_worker.pipeline import Worker
+    from clipco_worker.pipeline import Worker
 
     project, worker = line_project(home, tmp_path)
     pid = project["id"]
@@ -125,7 +125,7 @@ def test_notes_and_exclusions_can_be_saved_while_other_footage_is_being_analysed
     from conftest import ScriptedSpeech, ScriptedVision
     from test_project import A_ROLL, B_ROLL, corpus
 
-    from clipcon_worker.pipeline import Worker
+    from clipco_worker.pipeline import Worker
 
     folder = corpus(tmp_path / "shoot")
     vision = ScriptedVision(B_ROLL)

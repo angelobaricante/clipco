@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from clipcon_worker.speech import Transcript, TranscriptSpan
+from clipco_worker.speech import Transcript, TranscriptSpan
 
 
 def make_clip(path: Path, seconds: float = 12.0, audio: bool = True) -> Path:
@@ -71,7 +71,7 @@ class ScriptedVision:
         self.on_describe = lambda request: None
 
     def describe(self, request):
-        from clipcon_worker.vision import InferenceError
+        from clipco_worker.vision import InferenceError
 
         self.calls += 1
         self.on_describe(request)
@@ -105,7 +105,7 @@ class RecordedVision:
         self.calls += 1
         self.requests.append(request)
         if self.fail:
-            from clipcon_worker.vision import InferenceError
+            from clipco_worker.vision import InferenceError
             raise InferenceError("recorded failure")
         frame_ids = [f"{f.id} at {f.time:.1f}s" if self.echo_prompt_lines else f.id for f in request.frames]
         transcript_ids = [f"{t.id} [{t.start:.1f}-{t.end:.1f}s]" if self.echo_prompt_lines else t.id
@@ -144,4 +144,4 @@ def clip(tmp_path) -> Path:
 
 @pytest.fixture
 def home(tmp_path) -> Path:
-    return tmp_path / "clipcon-home"
+    return tmp_path / "clipco-home"

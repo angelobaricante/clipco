@@ -21,7 +21,7 @@ The speech and vision responses in these tests are recorded or scripted, so they
 
 ## Migrating a copy of the real local index
 
-A `.backup` copy of `~/Library/Application Support/Clipcon/index.sqlite` was migrated by running `clipcon-worker --home <copy> projects`. The copy had 3 Projects, 12 clips, 32 Segments, 1 note and 12 relationships. After migration it had 12 memberships, 1 note, 32 Segments and 12 re-derived relationships, with statuses unchanged (2 ready, 10 stale). Every Segment was marked `needs_review` with its legacy whole-clip basis. No inference ran.
+A `.backup` copy of `~/Library/Application Support/Clipco/index.sqlite` was migrated by running `clipco-worker --home <copy> projects`. The copy had 3 Projects, 12 clips, 32 Segments, 1 note and 12 relationships. After migration it had 12 memberships, 1 note, 32 Segments and 12 re-derived relationships, with statuses unchanged (2 ready, 10 stale). Every Segment was marked `needs_review` with its legacy whole-clip basis. No inference ran.
 
 For all 32 Segments, `segment_context` from the legacy code before migration matched the new code after migration on these fields:
 
@@ -55,7 +55,7 @@ Runtime: whisper.cpp `ggml-large-v3-turbo.bin` with Silero VAD v5.1.2, and Ollam
 
 ## Native app
 
-The Debug build of `Clipcon.app` was launched with `open -n --env CLIPCON_HOME=<scratch home>` and `-ClipconAutomationReview`. The automation calls the same model functions as the inspector's reuse switch (`-ClipconAutomationReuse`) and its Segment role menu (`-ClipconAutomationRole`).
+The Debug build of `Clipco.app` was launched with `open -n --env CLIPCO_HOME=<scratch home>` and `-ClipcoAutomationReview`. The automation calls the same model functions as the inspector's reuse switch (`-ClipcoAutomationReuse`) and its Segment role menu (`-ClipcoAutomationRole`).
 
 - **Run 1:** reuse turned off and the correction cleared.
 - **Run 2:** reuse turned on and Segment 3 set to B-roll. MCP library search then returned both B-roll Segments, with both Projects as origins.

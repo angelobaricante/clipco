@@ -9,7 +9,7 @@ This page lists what has been measured, how to reproduce it, and what still need
 | Local indexing and search with the internet unreachable | **Process-level proof done** (agent-verified). **Machine-level run (Wi-Fi off) done manually by the creator** on 2026-10-10; its report and screenshots are kept by the creator and are not in this repository. | [`evidence/offline-proof-sandbox-2026-10-10.json`](evidence/offline-proof-sandbox-2026-10-10.json) |
 | Codex retrieves footage context through MCP | Done in #3/#4 (real Codex sessions, `codex-cli 0.162.0-alpha.2`) | Issues #3, #4 |
 | Correction-plus-B-roll query through Codex MCP | **Done manually by the creator** on 2026-10-10. The session and recording are kept by the creator and were not reviewed by the agent. | — |
-| Discovery tokens: direct inspection vs. MCP | **Not run.** The creator decided not to benchmark for this submission. The harness stays available. | `clipcon-benchmark` (below) |
+| Discovery tokens: direct inspection vs. MCP | **Not run.** The creator decided not to benchmark for this submission. The harness stays available. | `clipco-benchmark` (below) |
 | Warm retrieval latency | Measured: 1–5 ms per MCP tool call | Below |
 
 **No token savings are claimed.** The benchmark was not run.
@@ -18,7 +18,7 @@ Rows marked "done manually by the creator" were reported by the creator. The age
 
 ### Offline proof, process level (2026-10-10 00:01 Asia/Manila)
 
-`scripts/clipcon offline-proof --sandbox` stopped Ollama and restarted it cold. Both Ollama and the worker ran inside a macOS `sandbox-exec` profile ([`scripts/offline.sb`](../scripts/offline.sb)) that denies every network connection except loopback. The clip was imported into a fresh, empty index.
+`scripts/clipco offline-proof --sandbox` stopped Ollama and restarted it cold. Both Ollama and the worker ran inside a macOS `sandbox-exec` profile ([`scripts/offline.sb`](../scripts/offline.sb)) that denies every network connection except loopback. The clip was imported into a fresh, empty index.
 
 - **Offline conditions:** the worker tried TCP connections to `1.1.1.1:443`, `8.8.8.8:53` and `captive.apple.com:80`. All three were refused (`PermissionError: Operation not permitted`). Loopback to Ollama worked.
   - This is a process-level proof. The Mac itself was still online, because this agent session needs the network.
@@ -63,19 +63,19 @@ Against the spec's provisional targets:
 
 ### Machine-level offline proof (creator)
 
-1. While online, run `scripts/clipcon start` once so the dependencies and models are cached.
+1. While online, run `scripts/clipco start` once so the dependencies and models are cached.
 2. Create a Project for the proof. To keep your main index untouched, point the scratch commands at a separate home:
    ```sh
-   export CLIPCON_HOME=~/clipcon-offline-proof
-   worker/.venv/bin/clipcon-worker create-project --name "Offline proof"   # note the prj_… id
+   export CLIPCO_HOME=~/clipco-offline-proof
+   worker/.venv/bin/clipco-worker create-project --name "Offline proof"   # note the prj_… id
    ```
 3. Turn the Mac's networking off: Wi-Fi off and Ethernet unplugged. Optionally restart the Mac.
 4. Run the proof on a clip that has never been indexed in that home:
    ```sh
-   scripts/clipcon offline-proof --project prj_… --query "what you say in the clip" /path/to/new-clip.mov
+   scripts/clipco offline-proof --project prj_… --query "what you say in the clip" /path/to/new-clip.mov
    ```
-5. The command refuses if any probe target answers, so a connected Mac cannot pass. It prints the verdict and saves a JSON report under `~/.clipcon/evidence/`. Exit code 0 means verified, 2 means the run finished but wasn't verified (it lists the reasons), and 1 means it refused.
-6. Still offline, run `scripts/clipcon start` (everything it uses should already be cached; note it if anything fails) and review the clip in the app. Take the screenshots now.
+5. The command refuses if any probe target answers, so a connected Mac cannot pass. It prints the verdict and saves a JSON report under `~/.clipco/evidence/`. Exit code 0 means verified, 2 means the run finished but wasn't verified (it lists the reasons), and 1 means it refused.
+6. Still offline, run `scripts/clipco start` (everything it uses should already be cached; note it if anything fails) and review the clip in the app. Take the screenshots now.
 7. Turn networking back on before the Codex handoff. Codex's own inference needs internet; do not claim Codex works offline.
 
 `--sandbox` gives the process-level variant shown above, without turning the Mac offline.
@@ -83,18 +83,18 @@ Against the spec's provisional targets:
 ### Discovery benchmark (creator-authorized; sends footage to OpenAI and spends Codex credits)
 
 - **Baseline route:** Codex inspects the originals directly (filenames, `ffprobe`, sampled frames, any transcription it can run). This sends frames and transcripts to OpenAI.
-- **MCP route:** Codex can use Clipcon's MCP server.
+- **MCP route:** Codex can use Clipco's MCP server.
 - **Same conditions on both routes:** same prompt, same model, same sandbox, same footage folder (left read-only), plus a scratch working folder. All other configured MCP servers are disabled on both routes.
 
 1. Copy [`evidence/benchmark-queries.example.json`](evidence/benchmark-queries.example.json). Write the three discovery requests for your corpus, and fill in each request's expected file and time range after watching the footage.
 2. Run:
    ```sh
-   worker/.venv/bin/clipcon-benchmark --send-footage-to-codex --model <the same model for both routes> \
+   worker/.venv/bin/clipco-benchmark --send-footage-to-codex --model <the same model for both routes> \
      --footage /path/to/project/originals --queries my-queries.json
    ```
    - The command refuses to run without `--send-footage-to-codex`.
    - Each route runs requests 1–3 in one Codex session, then asks request 1 again in the same session. That last row shows conversation/prompt-cache reuse. It is not a fresh-session repeat.
-   - Codex's sandbox does not stop the baseline from reading Clipcon's own index. The report counts any shell command that touches it (`Index reads` column) and warns. A baseline that read the index is not a clean comparison.
+   - Codex's sandbox does not stop the baseline from reading Clipco's own index. The report counts any shell command that touches it (`Index reads` column) and warns. A baseline that read the index is not a clean comparison.
 3. The JSON report records, per request, from Codex's own session log:
    - input, cached and uncached input tokens, and output and reasoning tokens;
    - model requests, and tool calls by tool;
@@ -131,7 +131,7 @@ Setup and run instructions: [README](../README.md).
 - Speech-to-camera role detection depends on the vision model. In the site-visit Project, clips with mostly speech were labelled B-roll because nobody faces the camera.
 - No corpus with a spoken correction or repeated take has been recorded yet. Correction detection has not been shown on real footage.
 - Recipe/model changes are detected when the app checks sources, not live through MCP (see [analysis-recipe.md](analysis-recipe.md)).
-- Opening a second window with File ▸ New Clipcon Window shows an empty browser (found in #6).
+- Opening a second window with File ▸ New Clipco Window shows an empty browser (found in #6).
 
 ## Disclosures
 
@@ -148,7 +148,7 @@ Setup and run instructions: [README](../README.md).
 
 ## Demo path (about 3 minutes)
 
-1. **Offline (networking off):** show the Wi-Fi menu turned off. Run `scripts/clipcon offline-proof` on a new clip, then show the verdict line.
+1. **Offline (networking off):** show the Wi-Fi menu turned off. Run `scripts/clipco offline-proof` on a new clip, then show the verdict line.
 2. **App:** open the Project. Show the new clip ready, alongside the cached ones. Say clearly that the other clips were indexed earlier.
 3. **Review:** select a clip and play it (double-click). The transcript follows playback. Add a creator note, then exclude a clip.
 4. **Online again:** in Codex, ask the discovery request. Show the `search_footage` → `get_segment_context` → `resolve_media` calls and the returned source ranges.

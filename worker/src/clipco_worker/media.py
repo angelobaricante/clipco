@@ -1,4 +1,4 @@
-"""FFmpeg/ffprobe adapters. Media is only ever read; outputs go to Clipcon's own directories."""
+"""FFmpeg/ffprobe adapters. Media is only ever read; outputs go to Clipco's own directories."""
 
 import json
 import subprocess

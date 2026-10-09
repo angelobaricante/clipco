@@ -104,7 +104,7 @@ struct SetupSheet: View {
                 }
             }
             Section {
-                Text("Clipcon talks to Ollama on 127.0.0.1 only and never falls back to cloud inference.")
+                Text("Clipco talks to Ollama on 127.0.0.1 only and never falls back to cloud inference.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             CodexSection()
@@ -153,7 +153,7 @@ struct CodexSection: View {
                                                         ? Color.primary : Color.orange)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Register Clipcon with Codex in Terminal:").font(.callout)
+                    Text("Register Clipco with Codex in Terminal:").font(.callout)
                     Text(s.addCommand).font(.caption.monospaced()).textSelection(.enabled)
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
@@ -167,7 +167,7 @@ struct CodexSection: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text("The helper reads the saved index only, so Codex can search while Clipcon is closed. "
+                Text("The helper reads the saved index only, so Codex can search while Clipco is closed. "
                      + "File paths it returns are locators, not new file permissions.")
                     .font(.caption).foregroundStyle(.secondary)
             } else if model.isCheckingMcp {
@@ -184,6 +184,6 @@ struct CodexSection: View {
         if let error = s.codex.error { return "Could not query Codex: \(error)" }
         let version = s.codex.version ?? "unknown version"
         if s.codexRegistrationDiffers { return "\(version) · registered with a different command" }
-        return s.codex.registered ? "\(version) · Clipcon registered" : "\(version) · not registered yet"
+        return s.codex.registered ? "\(version) · Clipco registered" : "\(version) · not registered yet"
     }
 }

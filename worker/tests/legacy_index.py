@@ -10,7 +10,7 @@ from pathlib import Path
 LEGACY_COMMIT = "6cde551"
 REPO = Path(__file__).resolve().parents[2]
 
-# Runs inside a subprocess whose import path puts the legacy clipcon_worker first.
+# Runs inside a subprocess whose import path puts the legacy clipcon_worker first (the package name before the Clipco rename).
 SCRIPT = r"""
 import json, sys
 from pathlib import Path
