@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
-    case all = "All Footage", aRoll = "A-roll", bRoll = "B-roll"
+    case all = "All Footage", aRoll = "A-roll", bRoll = "B-roll", needsReview = "Needs Review", excluded = "Excluded"
 
     var id: Self { self }
 
@@ -11,6 +11,8 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
         case .all: "film.stack"
         case .aRoll: "person.wave.2"
         case .bRoll: "photo.on.rectangle"
+        case .needsReview: "exclamationmark.bubble"
+        case .excluded: "eye.slash"
         }
     }
 
@@ -19,7 +21,33 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
         case .all: true
         case .aRoll: clip.role == "a-roll"
         case .bRoll: clip.role == "b-roll"
+        case .needsReview: clip.needsReview
+        case .excluded: clip.excluded
         }
+    }
+}
+
+enum BrowserMode: String, CaseIterable, Identifiable {
+    case grid = "Grid", list = "List"
+    var id: Self { self }
+    var symbol: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
+}
+
+/// Whether the original file can be opened: it must be where it was indexed, with the same size and
+/// modification time, or the saved context may not describe what would play.
+enum SourceAccess: Equatable {
+    case available(URL)
+    case unverified, missing, changed
+
+    @concurrent
+    static func check(_ clip: SourceClip) async -> SourceAccess {
+        guard let size = clip.sizeBytes, let mtime = clip.mtime else { return .unverified }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: clip.sourcePath) else {
+            return .missing
+        }
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        guard (attributes[.size] as? Int) == size, abs(modified - mtime) <= 1e-3 else { return .changed }
+        return .available(URL(filePath: clip.sourcePath))
     }
 }
 
@@ -47,6 +75,11 @@ final class AppModel {
     /// The clip a ⇧-click range or arrow key starts from: the last one clicked or moved to.
     var selectionAnchor: SourceClip.ID?
     var showInspector = true
+    var browserMode: BrowserMode = .grid
+    /// The original shown in the system Quick Look panel (Space, or double-click), once its source is verified.
+    var quickLookURL: URL?
+    /// Incremented to move keyboard focus to the toolbar search field (⌘F).
+    var searchFocusRequest = 0
     var inspectorTab: InspectorTab = .context
     var showImport = false
     var showSetup = false
@@ -125,6 +158,45 @@ final class AppModel {
             }
         } catch {
             readiness = Readiness(state: .inferenceFailed, detail: error.localizedDescription, guidance: "Retry.")
+        }
+    }
+
+    /// Saves the creator's note through the worker; Codex sees it in the next retrieval.
+    func saveNote(_ text: String, for clipID: SourceClip.ID) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let clip = clips.first(where: { $0.id == clipID }), trimmed != (clip.note?.text ?? "") else { return }
+        do {
+            try await worker.setNote(clipID: clipID, text: trimmed)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            errorMessage = "Could not save the note for \(clip.originalFilename): \(error.localizedDescription)"
+        }
+    }
+
+    /// Excludes clips from (or restores them to) new default search results. Reversible; nothing is deleted.
+    func setExcluded(_ targets: [SourceClip], _ excluded: Bool) async {
+        guard let project, !targets.isEmpty else { return }
+        do {
+            try await worker.setExcluded(projectID: project.id, clipIDs: targets.map(\.id), excluded: excluded)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            errorMessage = "Could not \(excluded ? "exclude" : "include") the clip: \(error.localizedDescription)"
+        }
+    }
+
+    /// The clips menu commands act on: the browser selection.
+    var commandTargets: [SourceClip] { clips.filter { selection.contains($0.id) } }
+
+    /// Opens the selected clip's original in Quick Look after checking it is the file that was indexed.
+    func quickLook() async {
+        guard let clip = selectedClip else { return }
+        switch await SourceAccess.check(clip) {
+        case .available(let url): quickLookURL = url
+        case .missing: errorMessage = "\(clip.originalFilename) is not at its indexed location."
+        case .changed: errorMessage = "\(clip.originalFilename) changed since it was indexed; re-analyse it first."
+        case .unverified: errorMessage = "\(clip.originalFilename) has not been checked by analysis yet."
         }
     }
 

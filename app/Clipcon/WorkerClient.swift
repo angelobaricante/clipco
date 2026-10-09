@@ -134,11 +134,23 @@ struct WorkerClient: Sendable {
     }
 
     /// Reads the saved index only, so it answers while another worker process is analysing footage.
+    /// The creator's own search also matches excluded clips (marked), so they can be found and restored.
     func search(projectID: String, query: String) async throws -> SearchPage {
-        guard let page = try await run(["search", "--project", projectID, "--query", query]).search else {
+        let args = ["search", "--project", projectID, "--query", query, "--include-excluded"]
+        guard let page = try await run(args).search else {
             throw WorkerError.noResult
         }
         return page
+    }
+
+    /// Saves the creator's note for a clip through the worker, the index's only writer. Empty text clears it.
+    func setNote(clipID: String, text: String) async throws {
+        _ = try await run(["set-note", "--clip", clipID, "--text", text])
+    }
+
+    /// Excludes clips from, or restores them to, new default search results. No context is deleted.
+    func setExcluded(projectID: String, clipIDs: [String], excluded: Bool) async throws {
+        _ = try await run(["set-excluded", "--project", projectID, "--excluded", excluded ? "yes" : "no"] + clipIDs)
     }
 
     /// Forgets clips' saved context and frame cache. The original video files are never touched.

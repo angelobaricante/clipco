@@ -1,7 +1,9 @@
+import QuickLook
 import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -13,6 +15,8 @@ struct ContentView: View {
                 .navigationTitle(model.project?.name ?? "Clipcon")
                 .navigationSubtitle(model.trimmedQuery.isEmpty ? model.filter.rawValue : "Search")
                 .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search footage context")
+                .searchFocused($searchFocused)
+                .onChange(of: model.searchFocusRequest) { searchFocused = true }
                 .task(id: model.searchText) {
                     try? await Task.sleep(for: .milliseconds(250))  // debounce typing
                     guard !Task.isCancelled else { return }
@@ -23,7 +27,15 @@ struct ContentView: View {
             InspectorView()
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 520)
         }
+        .quickLookPreview($model.quickLookURL)
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("View", selection: $model.browserMode) {
+                    ForEach(BrowserMode.allCases) { Label($0.rawValue, systemImage: $0.symbol).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("Show footage as a grid or a list (⌘1, ⌘2)")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Import", systemImage: "square.and.arrow.down") { model.showImport = true }
                     .help("Import a footage folder or source clip (⇧⌘I)")
@@ -33,45 +45,59 @@ struct ContentView: View {
                     .help("Show or hide the inspector (⌘I)")
             }
         }
-        .confirmationDialog(
-            model.clipsToRemove.count == 1 ? "Remove “\(model.clipsToRemove[0].originalFilename)” from this Project?"
-                                           : "Remove \(model.clipsToRemove.count) clips from this Project?",
-            isPresented: Binding(get: { !model.clipsToRemove.isEmpty }, set: { if !$0 { model.clipsToRemove = [] } }),
-            presenting: model.clipsToRemove
-        ) { clips in
-            Button("Remove from Project", role: .destructive) { Task { await model.remove(clips) } }
-        } message: { clips in
-            Text("Clipcon deletes its transcript, frame observations, and suggested relationships for "
-                 + (clips.count == 1 ? "this clip. The original video file stays where it is."
-                                     : "these clips. The original video files stay where they are."))
-        }
-        .confirmationDialog(
-            "Delete the Project “\(model.projectToDelete?.name ?? "")”?",
-            isPresented: Binding(get: { model.projectToDelete != nil }, set: { if !$0 { model.projectToDelete = nil } }),
-            presenting: model.projectToDelete
-        ) { project in
-            Button("Delete Project", role: .destructive) { Task { await model.delete(project) } }
-        } message: { _ in
-            Text("Clipcon deletes the saved context for every clip in this Project, and Codex can no longer "
-                 + "retrieve it. Your original video files are not affected.")
-        }
-        #if DEBUG
-        // `-ClipconSelectionLog /path` records each selection change, to verify mouse selection from outside.
-        .onChange(of: model.selection) {
-            guard let path = UserDefaults.standard.string(forKey: "ClipconSelectionLog") else { return }
-            let names = model.clips.filter { model.selection.contains($0.id) }.map(\.originalFilename)
-            try? (names.sorted().joined(separator: ",") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
-        }
-        #endif
+        .modifier(ProjectDialogs())
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .sheet(isPresented: $model.showSetup) { SetupSheet() }
-        .alert("Something went wrong", isPresented: Binding(
-            get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(model.errorMessage ?? "")
-        }
+    }
+}
+
+/// Destructive confirmations and error alerts for the Project window.
+struct ProjectDialogs: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                model.clipsToRemove.count == 1
+                    ? "Remove “\(model.clipsToRemove[0].originalFilename)” from this Project?"
+                    : "Remove \(model.clipsToRemove.count) clips from this Project?",
+                isPresented: Binding(get: { !model.clipsToRemove.isEmpty },
+                                     set: { if !$0 { model.clipsToRemove = [] } }),
+                presenting: model.clipsToRemove
+            ) { clips in
+                Button("Remove from Project", role: .destructive) { Task { await model.remove(clips) } }
+            } message: { clips in
+                Text("Clipcon deletes its transcript, frame observations, and suggested relationships for "
+                     + (clips.count == 1 ? "this clip. The original video file stays where it is."
+                                         : "these clips. The original video files stay where they are."))
+            }
+            .confirmationDialog(
+                "Delete the Project “\(model.projectToDelete?.name ?? "")”?",
+                isPresented: Binding(get: { model.projectToDelete != nil },
+                                     set: { if !$0 { model.projectToDelete = nil } }),
+                presenting: model.projectToDelete
+            ) { project in
+                Button("Delete Project", role: .destructive) { Task { await model.delete(project) } }
+            } message: { _ in
+                Text("Clipcon deletes the saved context for every clip in this Project, and Codex can no longer "
+                     + "retrieve it. Your original video files are not affected.")
+            }
+            #if DEBUG
+            // `-ClipconSelectionLog /path` records each selection change, to verify mouse selection from outside.
+            .onChange(of: model.selection) {
+                guard let path = UserDefaults.standard.string(forKey: "ClipconSelectionLog") else { return }
+                let names = model.clips.filter { model.selection.contains($0.id) }.map(\.originalFilename)
+                try? (names.sorted().joined(separator: ",") + "\n").write(toFile: path, atomically: true,
+                                                                         encoding: .utf8)
+            }
+            #endif
+            .alert("Something went wrong", isPresented: Binding(
+                get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(model.errorMessage ?? "")
+            }
     }
 }
 
@@ -101,10 +127,13 @@ struct SidebarView: View {
             })
         ) {
             Section(model.project?.name ?? "No Project") {
-                ForEach(FootageFilter.allCases) { filter in
-                    Label(filter.rawValue, systemImage: filter.symbol)
-                        .badge(model.count(filter))
-                        .tag(SidebarItem.filter(filter))
+                ForEach([FootageFilter.all, .aRoll, .bRoll]) { filter in
+                    FilterRow(filter: filter, count: model.count(filter))
+                }
+            }
+            Section("Review") {
+                ForEach([FootageFilter.needsReview, .excluded]) { filter in
+                    FilterRow(filter: filter, count: model.count(filter))
                 }
             }
             if !model.projects.isEmpty {
@@ -142,6 +171,18 @@ struct SidebarView: View {
             }
             .padding(12)
         }
+    }
+}
+
+struct FilterRow: View {
+    let filter: FootageFilter
+    let count: Int
+
+    var body: some View {
+        Label(filter.rawValue, systemImage: filter.symbol)
+            .badge(count)
+            .tag(SidebarItem.filter(filter))
+            .accessibilityLabel("\(filter.rawValue), \(count) \(count == 1 ? "clip" : "clips")")
     }
 }
 
