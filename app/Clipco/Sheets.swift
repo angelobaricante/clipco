@@ -89,6 +89,15 @@ struct SetupSheet: View {
 
     var body: some View {
         Form {
+            Section {
+                Image("ClipcoLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 180, height: 60)
+                    .foregroundStyle(.primary)
+                    .accessibilityLabel("Clipco")
+                    .padding(.vertical, 6)
+            }
             Section("Local analysis") {
                 if let r = model.readiness {
                     LabeledContent("State", value: r.state.rawValue.replacingOccurrences(of: "_", with: " "))

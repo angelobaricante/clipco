@@ -143,6 +143,7 @@ Setup and run instructions: [README](../README.md).
   - The approved interface direction came from a throwaway browser prototype (`prototype/footage-review-flow`). The prototype is not shipped.
   - Test fixtures are generated with FFmpeg test sources.
   - No third-party footage is in the repository.
+  - Clipco logo: generated with the built-in image generation tool, then selected and iterated by the creator; production logo variations trace the approved artwork. Cursor's geometric style was an initial design reference.
   - The creator should confirm there is nothing else to disclose under the hackathon's rules.
 - **Inference runs locally:** core inference (speech, vision) runs on the Mac with no cloud fallback. Codex, the downstream agent, uses OpenAI's cloud.
 

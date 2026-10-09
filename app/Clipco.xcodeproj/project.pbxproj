@@ -16,12 +16,14 @@
 		AC4B19634D7C1AECAF7E243F /* WorkerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0030A6A6F527387CD0E1B8 /* WorkerClient.swift */; };
 		C5CDAF329A75099DB0DB7E15 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ACBD51B72CCCAEF2D8BCB4C /* AppModel.swift */; };
 		D12F602E69068986F6EDF0DD /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E271739FEEA55898A9654 /* InspectorView.swift */; };
+		DFEB034FB3B61FB0E6C6F82C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 212C7B10C1228F2BDD2F1CD5 /* Assets.xcassets */; };
 		FE619D4000027A6C4BAD9A35 /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D80F7DE7303E42FF79ED953 /* BrowserView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		07BEF27B716E95B7EFD487E3 /* Clipco.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipco.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0ACBD51B72CCCAEF2D8BCB4C /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		212C7B10C1228F2BDD2F1CD5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2D80F7DE7303E42FF79ED953 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
 		3ACDB889C2575D028825E88A /* ClipcoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipcoApp.swift; sourceTree = "<group>"; };
 		5A4E271739FEEA55898A9654 /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
@@ -55,6 +57,7 @@
 			isa = PBXGroup;
 			children = (
 				0ACBD51B72CCCAEF2D8BCB4C /* AppModel.swift */,
+				212C7B10C1228F2BDD2F1CD5 /* Assets.xcassets */,
 				CCBB5B1169767DC42BFFFC69 /* AutomationRun.swift */,
 				2D80F7DE7303E42FF79ED953 /* BrowserView.swift */,
 				3ACDB889C2575D028825E88A /* ClipcoApp.swift */,
@@ -77,6 +80,7 @@
 			buildConfigurationList = 7D15051319857B2A249768D1 /* Build configuration list for PBXNativeTarget "Clipco" */;
 			buildPhases = (
 				C1D557F7361E0B9D42CC6D97 /* Sources */,
+				F92EFBFAE1EAB6FA4E3894B3 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -118,6 +122,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F92EFBFAE1EAB6FA4E3894B3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFEB034FB3B61FB0E6C6F82C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C1D557F7361E0B9D42CC6D97 /* Sources */ = {
