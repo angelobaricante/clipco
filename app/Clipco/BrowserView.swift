@@ -9,12 +9,21 @@ struct BrowserView: View {
     var body: some View {
         if !model.trimmedQuery.isEmpty {
             SearchResultsView()
+        } else if !model.hasScope {
+            ContentUnavailableView {
+                Label("No Project Yet", systemImage: "folder.badge.plus")
+            } description: {
+                Text("Create a Project for a video idea, or drop videos and folders here to start one. "
+                     + "Originals stay where they are.")
+            } actions: {
+                Button("New Project…") { model.showNewProject = true }
+            }
         } else if model.clips.isEmpty {
             ContentUnavailableView {
                 Label("No Footage Yet", systemImage: "film")
             } description: {
-                Text("Import a folder of A-roll and B-roll, or a single clip, to transcribe speech and describe "
-                     + "sampled frames on this Mac.")
+                Text("Drop videos or folders here, or import them, to transcribe speech and describe sampled "
+                     + "frames on this Mac. Analysis is queued and runs one clip at a time.")
             } actions: {
                 Button("Import Footage…") { model.showImport = true }
             }

@@ -50,6 +50,7 @@ class JobQueue:
         self.db = worker.store.db
         self.ready = ready
         self.lock_path = worker.home / "queue.lock"
+        self._stopping = False
 
     # Requests
 
@@ -216,6 +217,12 @@ class JobQueue:
                                 ("Clipco stopped before this job started. Resume to run it.", time.time(),
                                  row["id"]))
 
+    def stop(self) -> None:
+        """The runner is being shut down (the app quit): contain the active job's work, leave it interrupted for
+        an explicit resume, and start nothing else. Safe to call from a signal handler."""
+        self._stopping = True
+        cancel.cancel()
+
     def _owned_here(self, job_id: str) -> bool:
         row = self.db.execute("SELECT owner FROM jobs WHERE id=?", (job_id,)).fetchone()
         return bool(row and row["owner"] == str(os.getpid()))
@@ -232,7 +239,7 @@ class JobQueue:
             self._interrupt_orphans(include_queued=False)  # a runner that died mid-job
             self.db.execute("UPDATE jobs SET state='queued', error=NULL, updated_at=? WHERE state='waiting'",
                             (time.time(),))
-            while not self.paused:
+            while not self.paused and not self._stopping:
                 row = self.db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created_at, rowid"
                                       " LIMIT 1").fetchone()
                 if row is None:
@@ -285,7 +292,9 @@ class JobQueue:
         try:
             outcome = self._perform(job, step)
         except cancel.Cancelled:
-            state = self._settle_unfinished(self._row(job["id"]), "cancelled", "Cancelled by the creator.")
+            state = self._settle_unfinished(self._row(job["id"]), *(
+                ("interrupted", "Clipco quit while this job was running. Resume to run it again.") if self._stopping
+                else ("cancelled", "Cancelled by the creator.")))
             report("job_" + state, {"job_id": job["id"], "clip_id": job["clip_id"]})
             return state
         except ServiceUnavailable as e:

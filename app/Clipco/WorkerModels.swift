@@ -360,6 +360,71 @@ struct WorkerEvent: Decodable, Sendable {
     var elapsed: Double?
     var kind: String?
     var message: String?
+    var detail: String?
+    var jobId: String?
+    // Queue results
+    var jobs: [AnalysisJob]?
+    var counts: [String: Int]?
+    var paused: Bool?
+    var running: Bool?
+    var alreadyRunning: Bool?
+    var alreadyQueued: [AnalysisJob]?
+    var skipped: [SkippedItem]?
+
+    /// The queue as a result reported it (every queue command returns it).
+    var queue: QueueState? {
+        guard let jobs else { return nil }
+        return QueueState(jobs: jobs, paused: paused ?? false, running: running ?? false)
+    }
+}
+
+/// Queued work to prepare or enrich one Source clip, bound to its destination when it was requested.
+struct AnalysisJob: Decodable, Identifiable, Hashable, Sendable {
+    enum State: String, Decodable, Sendable {
+        case queued, active, waiting, completed, failed, cancelled, interrupted
+    }
+
+    var id: String
+    var operation: String
+    var clipId: String
+    var projectId: String?
+    var sourcePath: String
+    var originalFilename: String
+    var state: State
+    var stage: String?
+    var error: String?
+    var attempts: Int
+    var cancelRequested: Bool
+
+    var operationTitle: String {
+        switch operation {
+        case "import": "Analyze"
+        case "reanalyse": "Re-analyse"
+        case "enrich_tone": "Read emotional tone"
+        default: operation
+        }
+    }
+
+    var canCancel: Bool { [.queued, .active, .waiting, .interrupted].contains(state) && !cancelRequested }
+    var canRetry: Bool { [.failed, .cancelled, .interrupted].contains(state) }
+}
+
+struct QueueState: Equatable, Sendable {
+    var jobs: [AnalysisJob]
+    var paused: Bool
+    var running: Bool
+
+    func count(_ state: AnalysisJob.State) -> Int { jobs.filter { $0.state == state }.count }
+    var active: AnalysisJob? { jobs.first { $0.state == .active } }
+    /// Work that has not finished: it runs, waits, or awaits the creator's resume.
+    var unfinished: Int { jobs.filter { [.queued, .active, .waiting, .interrupted].contains($0.state) }.count }
+    var finished: Int { jobs.filter { [.completed, .cancelled].contains($0.state) }.count }
+}
+
+/// A dropped or chosen item that was not registered, and why.
+struct SkippedItem: Decodable, Hashable, Sendable {
+    var path: String
+    var reason: String
 }
 
 extension Double {

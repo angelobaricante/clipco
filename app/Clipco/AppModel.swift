@@ -98,7 +98,19 @@ final class AppModel {
     var showSetup = false
     var mcpStatus: McpStatus?
     var isCheckingMcp = false
+    /// The queue's active job as the sidebar and browser show it; nil when nothing is running.
     var activity: ImportActivity?
+    /// The recoverable analysis queue: every job with its state, and whether it is paused or running.
+    var queue: QueueState?
+    var showActivity = false
+    /// New Project sheet; footage dropped on an empty workspace arrives prefilled with a suggested name.
+    var showNewProject = false
+    var newProjectFootage: [URL] = []
+    /// What the last drop or import registered and skipped, shown until dismissed.
+    var importNotice: String?
+    private var runner: Task<Void, Never>?
+    /// A run was asked for while the runner was finishing (e.g. Resume right after a pause took effect).
+    private var runRequested = false
     var isCheckingSources = false
     var errorMessage: String?
     /// Awaiting confirmation in a destructive dialog.
@@ -130,6 +142,9 @@ final class AppModel {
     func start() async {
         async let ready: Void = refreshReadiness()
         do {
+            // Work a previous session left unfinished is marked interrupted, to resume only when asked.
+            queue = try await worker.queue("reconcile")
+            if queue?.running == true { runQueue() }  // follow it; this runner returns at once
             projects = try await worker.projects()
             if let latest = projects.last { try await open(latest) }
         } catch {
@@ -239,31 +254,26 @@ final class AppModel {
         }
     }
 
-    /// Ready clips with Segments not yet read for emotional tone.
+    /// Ready clips with Segments not yet read for emotional tone, and no tone job already waiting for them.
     func canEnrichTone(_ targets: [SourceClip]) -> Bool {
-        activity == nil && targets.contains { $0.status == .ready && $0.segments.contains { $0.tone.state == "not_analyzed" } }
+        targets.contains { clip in
+            clip.status == .ready && clip.segments.contains { $0.tone.state == "not_analyzed" }
+                && !hasUnfinishedJob(clip.id, operations: ["enrich_tone"])
+        }
     }
 
-    /// Reads emotional tone for the chosen clips from their saved evidence, one after another, with progress.
-    /// Only what the creator asks for is enriched; nothing else in the library is upgraded.
+    /// Queues emotional-tone reading of the chosen clips from their saved evidence. Only what the creator asks
+    /// for is enriched; nothing else in the library is upgraded.
     func enrichTone(_ targets: [SourceClip]) async {
         guard canEnrichTone(targets) else { return }
-        let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
-        activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
-        defer { activity = nil }
-        do {
-            guard await modelsReady() else { return }
-            let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
-                await MainActor.run { self?.track(event) }
-            }
-            _ = try await worker.enrichTone(projectID: scopeProjectID,
-                                            clipIDs: targets.map(\.id), onProgress: onProgress)
-            try await reload()
-            if !trimmedQuery.isEmpty { await search() }
-        } catch {
-            report(error)
-            try? await reload()
-        }
+        await enqueue(operation: "enrich_tone", targets)
+    }
+
+    func hasUnfinishedJob(_ clipID: SourceClip.ID, operations: Set<String>) -> Bool {
+        queue?.jobs.contains {
+            $0.clipId == clipID && operations.contains($0.operation)
+                && [.queued, .active, .waiting, .interrupted].contains($0.state)
+        } ?? false
     }
 
     /// Records the creator's role for one Segment (nil returns it to the suggested role).
@@ -355,7 +365,7 @@ final class AppModel {
     /// Re-verifies every analysed clip's original (moved, deleted, edited, or restored) and the analysis
     /// settings, then shows the result. Skipped while an import or retry is writing the index.
     func checkSources() async {
-        guard hasScope, activity == nil else { return }
+        guard hasScope, queue?.active == nil else { return }
         isCheckingSources = true
         defer { isCheckingSources = false }
         do {
@@ -368,28 +378,27 @@ final class AppModel {
 
     /// Clips whose context is not current and that a re-analysis could refresh.
     func canRetry(_ targets: [SourceClip]) -> Bool {
-        activity == nil && !targets.isEmpty && targets.allSatisfy { [.failed, .stale, .missing].contains($0.status) }
+        !targets.isEmpty && targets.allSatisfy {
+            [.failed, .stale, .missing].contains($0.status)
+                && !hasUnfinishedJob($0.id, operations: ["import", "reanalyse"])
+        }
     }
 
-    /// Re-analyses clips from their originals with real progress. Each keeps its ID, note, and exclusion;
-    /// unchanged content is reused without inference, and a missing original is reported, not analysed.
+    /// Queues re-analysis of clips from their originals. Each keeps its ID, note, and exclusion; unchanged
+    /// content is reused without inference, and a missing original is reported, not analysed.
     func retry(_ targets: [SourceClip]) async {
         guard hasScope, canRetry(targets) else { return }
-        let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
-        activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
-        defer { activity = nil }
+        await enqueue(operation: "reanalyse", targets)
+    }
+
+    private func enqueue(operation: String, _ targets: [SourceClip]) async {
         do {
-            guard await modelsReady() else { return }
-            let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
-                await MainActor.run { self?.track(event) }
-            }
-            _ = try await worker.retry(projectID: scopeProjectID, clipIDs: targets.map(\.id),
-                                       onProgress: onProgress)
-            try await reload()
-            if !trimmedQuery.isEmpty { await search() }
+            let result = try await worker.enqueue(operation: operation, projectID: scopeProjectID,
+                                                  clipIDs: targets.map(\.id))
+            queue = result.queue ?? queue
+            runQueue()
         } catch {
-            report(error)
-            try? await reload()
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -408,30 +417,9 @@ final class AppModel {
         }
     }
 
-    /// Loads the model when it is cold; false (with the reason shown) when analysis cannot run now.
-    private func modelsReady() async -> Bool {
-        if readiness?.state == .cold {
-            activity?.stage = "Loading model"
-            await warmUp()
-        }
-        guard readiness?.state == .ready else {
-            errorMessage = readiness.map { "\($0.detail) \($0.guidance)" } ?? "Local models are not ready."
-            return false
-        }
-        return true
-    }
-
-    private func report(_ error: Error) {
-        errorMessage = error.localizedDescription
-        if case WorkerError.failed(let kind, let message) = error,
-           kind == "InferenceError" || kind == "ServiceUnavailable" {
-            readiness = Readiness(state: kind == "ServiceUnavailable" ? .serviceUnavailable : .inferenceFailed,
-                                  detail: message, guidance: "Check the Ollama log, then retry the clip.")
-        }
-    }
-
-    /// Removal and deletion wait while footage is being imported, so an import never re-adds what was removed.
-    var canDelete: Bool { activity == nil }
+    /// Removal and deletion are safe while jobs run: the worker resolves a removed source's jobs, and an
+    /// in-flight analysis cannot publish it again.
+    var canDelete: Bool { true }
 
     /// Forgets clips' saved context in Clipco; the original video files stay where they are.
     func remove(_ doomed: [SourceClip]) async {
@@ -518,59 +506,207 @@ final class AppModel {
         }
     }
 
-    /// Creates a Project when needed, then indexes the chosen Source clips and every video in chosen folders,
-    /// while the UI stays interactive. Completed clips are reviewable while the rest are still being analysed.
-    func importFootage(_ urls: [URL], newProjectName: String?, context: String) async {
-        guard let first = urls.first else { return }
+    /// Creates a Project. Only a name is needed: no model is loaded and no inference service is required.
+    @discardableResult
+    func createProject(name: String, context: String) async -> Project? {
+        do {
+            let created = try await worker.createProject(name: name, context: context)
+            projects.append(created)
+            try await open(created)
+            return created
+        } catch {
+            errorMessage = "Could not create \(name): \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// A Project name suggested from dropped footage: a dropped folder's name, the one file's name, or the
+    /// folder the files share.
+    nonisolated static func suggestedName(for urls: [URL]) -> String {
+        if let folder = urls.first(where: isFolder) { return folder.lastPathComponent }
+        guard let first = urls.first else { return "" }
+        if urls.count == 1 { return first.deletingPathExtension().lastPathComponent }
+        return first.deletingLastPathComponent().lastPathComponent
+    }
+
+    /// Whether a dropped or chosen item is a folder (a dropped folder's URL may lack the trailing slash).
+    nonisolated static func isFolder(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+
+    /// Footage dropped on the window: into the open Project, into the library while it is shown, or, with
+    /// nothing open, through New Project with a suggested name.
+    func drop(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        guard hasScope else {
+            newProjectFootage = urls
+            showNewProject = true
+            return
+        }
+        let destination = scopeProjectID
+        Task { await enqueue(urls, into: destination) }
+    }
+
+    /// Registers the chosen videos and folders in the destination now and queues their analysis. The
+    /// destination is fixed here, so opening another Project later cannot move this work.
+    func enqueue(_ urls: [URL], into projectID: String?) async {
+        guard !urls.isEmpty else { return }
         let accessed = urls.filter { $0.startAccessingSecurityScopedResource() }
         defer { accessed.forEach { $0.stopAccessingSecurityScopedResource() } }
-        activity = ImportActivity(filename: urls.count == 1 ? first.lastPathComponent : "\(urls.count) items",
-                                  stage: "Starting")
-        defer { activity = nil }
         do {
-            guard await modelsReady() else { return }
-            if let name = newProjectName {
-                let created = try await worker.createProject(name: name, context: context)
-                projects.append(created)
-                try await open(created)
+            let result = try await worker.enqueue(projectID: projectID, sources: urls)
+            queue = result.queue ?? queue
+            let added = result.jobs?.count ?? 0, already = result.alreadyQueued?.count ?? 0
+            let skipped = result.skipped ?? []
+            var parts = ["\(added) \(added == 1 ? "clip" : "clips") queued"]
+            if already > 0 { parts.append("\(already) already queued") }
+            if !skipped.isEmpty {
+                let names = skipped.prefix(3).map { URL(filePath: $0.path).lastPathComponent }.joined(separator: ", ")
+                let reasons = Set(skipped.map(\.reason)).sorted().joined(separator: " or ")
+                parts.append("\(skipped.count) skipped (\(reasons)): \(names)\(skipped.count > 3 ? ", …" : "")")
             }
-            guard let project else { return }
-            let isFolder = (try? first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            importNotice = parts.joined(separator: " · ")
+            if projectID == scopeProjectID { try await reload() }
+            runQueue()
+        } catch {
+            errorMessage = "Could not import: \(error.localizedDescription)"
+        }
+    }
+
+    /// Picker import: creates a Project first when asked, then queues the footage.
+    func importFootage(_ urls: [URL], newProjectName: String?, context: String) async {
+        var destination = scopeProjectID
+        if let name = newProjectName {
+            guard let created = await createProject(name: name, context: context) else { return }
+            destination = created.id
+        }
+        await enqueue(urls, into: destination)
+    }
+
+    /// Starts the queue runner unless it is running. It works through queued jobs one at a time in its own
+    /// worker process, so browsing, search and review stay responsive meanwhile.
+    func runQueue() {
+        guard runner == nil else {
+            runRequested = true
+            return
+        }
+        runRequested = false
+        runner = Task { [weak self] in
+            guard let self else { return }
             let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
                 await MainActor.run { self?.track(event) }
             }
-            if urls.count == 1 && !isFolder {
-                let result = try await worker.importClip(projectID: project.id, source: first, onProgress: onProgress)
-                try await reload()
-                select(result.clipId)
-            } else {
-                _ = try await worker.importSources(projectID: project.id, sources: urls, onProgress: onProgress)
-                try await reload()
+            do {
+                let result = try await worker.runQueue(onProgress: onProgress)
+                queue = result.queue ?? queue
+                if result.alreadyRunning == true {  // e.g. a runner a previous session left working
+                    await followOtherRunner()
+                }
+            } catch is CancellationError {
+                return  // the app is quitting; the runner leaves its job interrupted for resume
+            } catch {
+                errorMessage = "Analysis queue stopped: \(error.localizedDescription)"
             }
+            activity = nil
+            await refreshQueue()
+            runner = nil
+            // Work added or resumed while the runner was finishing starts now; waiting or paused work does not.
+            if let q = queue, !q.paused, !q.running, runRequested || q.count(.queued) > 0 { runQueue() }
+            try? await reload()
             if !trimmedQuery.isEmpty { await search() }
-        } catch {
-            report(error)
+        }
+    }
+
+    /// Shows the progress of a runner this app did not start, until it finishes.
+    private func followOtherRunner() async {
+        while queue?.running == true, !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            await refreshQueue()
             try? await reload()
         }
     }
 
-    /// Follows worker progress: shows newly registered clips, the live stage of the one being analysed,
-    /// and each clip's final state as soon as it is published.
+    /// The app is quitting: the runner stops its active job safely (child processes and the inference request
+    /// included) and leaves it interrupted, to resume after the next launch.
+    func stopRunner() {
+        runner?.cancel()
+    }
+
+    func refreshQueue() async {
+        if let q = try? await worker.queue("jobs") { queue = q }
+    }
+
+    /// Pause stops new jobs from starting; the active clip finishes.
+    func pauseQueue() async {
+        do { queue = try await worker.queue("pause") } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Un-pauses, and runs interrupted and waiting jobs again (after a restart, or once setup is complete).
+    func resumeQueue() async {
+        do {
+            queue = try await worker.queue("resume")
+            await refreshReadiness()
+            runQueue()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Queued work is removed; the active job stops safely. Footage and saved context are never deleted.
+    func cancel(_ jobs: [AnalysisJob]) async {
+        do {
+            queue = try await worker.queue("cancel", jobIDs: jobs.map(\.id))
+            try await reload()
+        } catch {
+            errorMessage = "Could not cancel: \(error.localizedDescription)"
+        }
+    }
+
+    func retry(_ jobs: [AnalysisJob]) async {
+        do {
+            queue = try await worker.queue("retry-jobs", jobIDs: jobs.map(\.id))
+            runQueue()
+        } catch {
+            errorMessage = "Could not retry: \(error.localizedDescription)"
+        }
+    }
+
+    func clearFinishedJobs() async {
+        do { queue = try await worker.queue("clear-jobs") } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// The Project (or library) a job's footage goes to, by name.
+    func destinationName(_ job: AnalysisJob) -> String {
+        guard let id = job.projectId else { return "Footage library" }
+        return projects.first { $0.id == id }?.name ?? "Deleted Project"
+    }
+
+    /// Follows the runner: the active job's live stage, newly started jobs, and each job's outcome as soon as
+    /// it is saved.
     private func track(_ event: WorkerEvent) {
-        if event.stage == "pending" {
-            activity?.stage = "Found \(event.filename ?? "clip")"
-            if !clips.contains(where: { $0.id == event.clipId }) { Task { try? await reload() } }
-            return
+        switch event.stage {
+        case "job_started":
+            let name = queue?.jobs.first { $0.id == event.jobId }?.originalFilename
+                ?? clips.first { $0.id == event.clipId }?.originalFilename ?? "Clip"
+            activity = ImportActivity(filename: name, stage: "Starting", clipID: event.clipId)
+            Task { await refreshQueue(); try? await reload() }
+        case "job_completed", "job_failed", "job_cancelled", "job_interrupted":
+            activity = nil
+            Task {
+                await refreshQueue()
+                try? await reload()
+                if !trimmedQuery.isEmpty { await search() }
+            }
+        case "waiting":
+            activity = nil
+            Task { await refreshQueue(); await refreshReadiness() }
+        default:
+            activity?.stage = Self.describe(event)
+            if let id = event.jobId, let i = queue?.jobs.firstIndex(where: { $0.id == id }) {
+                queue?.jobs[i].stage = event.stage
+            }
+            if ["ready", "failed", "missing"].contains(event.stage) { Task { try? await reload() } }
         }
-        activity?.stage = Self.describe(event)
-        guard let clipID = event.clipId else { return }
-        if activity?.clipID != clipID {
-            if let name = clips.first(where: { $0.id == clipID })?.originalFilename { activity?.filename = name }
-            activity?.clipID = clipID
-            if selection.isEmpty || clips.allSatisfy({ $0.id != clipID }) { select(clipID) }
-            Task { try? await reload() }
-        }
-        if ["ready", "failed", "missing"].contains(event.stage) { Task { try? await reload() } }
     }
 
     nonisolated static func describe(_ event: WorkerEvent) -> String {

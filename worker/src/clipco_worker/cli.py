@@ -239,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
                     clip_ids = [worker.store.resolve_clip(c, args.project) for c in args.clip_ids]
                     emit("result", **queue.enqueue(args.operation, args.project, clip_ids))
                 elif args.command == "run-queue":
+                    import signal
+                    signal.signal(signal.SIGTERM, lambda signum, frame: queue.stop())  # the app quitting
                     emit("result", **queue.run(progress=lambda stage, detail: emit("progress", stage=stage, **detail)))
                 else:
                     emit("result", **{"jobs": queue.list, "reconcile": queue.reconcile, "pause": queue.pause,

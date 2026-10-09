@@ -289,3 +289,20 @@ def test_reanalysis_and_tone_reading_are_queued_jobs_that_reuse_cached_evidence(
     queue.run()
     assert vision.calls == calls  # unchanged content and settings: the saved analysis is reused
     assert overview(home, project["id"]) == {"pour.mp4": "ready"}
+
+
+def test_quitting_the_app_stops_the_runner_and_leaves_its_job_interrupted_for_resume(home, tmp_path):
+    vision = ScriptedVision({})
+    worker = Worker(home, speech=RecordedSpeech(SPANS), vision=vision)
+    project = worker.create_project("Kitchen")
+    queue = JobQueue(worker)
+    queue.enqueue_import(project["id"], [three_clips(tmp_path)])
+    vision.on_describe = lambda request: request.original_filename == "b.mp4" and queue.stop()  # SIGTERM on quit
+
+    queue.run()
+
+    assert states(queue) == {"a.mp4": "completed", "b.mp4": "interrupted", "c.mp4": "queued"}
+    assert overview(home, project["id"]) == {"a.mp4": "ready", "b.mp4": "pending", "c.mp4": "pending"}
+    restarted = JobQueue(Worker(home, speech=RecordedSpeech(SPANS), vision=ScriptedVision({})))
+    restarted.reconcile()
+    assert states(restarted) == {"a.mp4": "completed", "b.mp4": "interrupted", "c.mp4": "interrupted"}

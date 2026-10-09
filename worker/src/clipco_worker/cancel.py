@@ -15,7 +15,7 @@ class Cancelled(BaseException):
     """The active job was cancelled. A BaseException, so per-clip failure handling never records it as a failure."""
 
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # cancel() may run in a signal handler on the thread holding it
 _cancelled = threading.Event()
 _children: set[subprocess.Popen] = set()
 _connections: set = set()
