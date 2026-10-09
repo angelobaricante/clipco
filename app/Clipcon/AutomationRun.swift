@@ -65,6 +65,20 @@ enum AutomationRun {
         model.browserMode = defaults.string(forKey: "ClipconAutomationMode") == "list" ? .list : .grid
         model.inspectorTab = InspectorTab(rawValue: (defaults.string(forKey: "ClipconAutomationTab") ?? "context")
             .capitalized) ?? .context
+        // `-ClipconAutomationPlay <seconds>` opens the player over the browser from that source time, lets it
+        // play, then records the position and the transcript line the inspector highlights.
+        if defaults.object(forKey: "ClipconAutomationPlay") != nil {
+            await model.openPlayer(clip.id, at: defaults.double(forKey: "ClipconAutomationPlay"))
+            try? await Task.sleep(for: .seconds(3))
+            let spoken = model.spokenLineID(in: clip)
+            let line = clip.segments.flatMap(\.transcript).first { $0.id == spoken }
+            var playback: [String: Any] = ["overlay_open": model.playingClipID == clip.id]
+            playback["access"] = model.player.access.map { String(describing: $0) } ?? "none"
+            playback["position"] = model.player.currentTime ?? -1
+            playback["spoken_line"] = line.map { "\($0.start)–\($0.end) \($0.text)" } ?? "none"
+            playback["inspector_clip"] = model.selectedClip?.originalFilename ?? "none"
+            report["playback"] = playback
+        }
         var commandF: [String] = []
         for top in NSApp.mainMenu?.items ?? [] {
             for item in top.submenu?.items ?? [] {

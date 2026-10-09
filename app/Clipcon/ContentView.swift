@@ -12,6 +12,11 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 190, ideal: 220)
         } detail: {
             BrowserView()
+                .overlay {
+                    if let id = model.playingClipID, let clip = model.clips.first(where: { $0.id == id }) {
+                        PlayerOverlay(clip: clip)
+                    }
+                }
                 .navigationTitle(model.project?.name ?? "Clipcon")
                 .navigationSubtitle(model.trimmedQuery.isEmpty ? model.filter.rawValue : "Search")
                 .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search footage context")

@@ -39,6 +39,7 @@ struct ClipActions: View {
     var body: some View {
         let allExcluded = !targets.isEmpty && targets.allSatisfy(\.excluded)
         if targets.count == 1 {
+            Button("Play", systemImage: "play") { Task { await model.openPlayer(targets[0].id) } }
             Button("Quick Look", systemImage: "eye") {
                 model.select(targets[0].id)
                 Task { await model.quickLook() }
@@ -94,13 +95,9 @@ struct ClipTable: View {
             ClipActions(targets: model.visibleClips.filter { ids.contains($0.id) })
         } primaryAction: { ids in
             guard ids.count == 1, let id = ids.first else { return }
-            model.select(id)
-            Task { await model.quickLook() }
+            Task { await model.openPlayer(id) }
         }
-        .onKeyPress(.space) {
-            Task { await model.quickLook() }
-            return .handled
-        }
+        .onKeyPress(.space) { model.playSelectedClip() ? .handled : .ignored }
         .onChange(of: model.selection) { _, new in
             if new.count == 1 { model.selectionAnchor = new.first }
         }
@@ -137,10 +134,7 @@ struct ClipGrid: View {
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: {
                             frames[clip.id] = $0
                         }
-                        .onTapGesture(count: 2) {
-                            model.select(clip.id)
-                            Task { await model.quickLook() }
-                        }
+                        .onTapGesture(count: 2) { Task { await model.openPlayer(clip.id) } }
                         .onTapGesture { click(clip.id) }
                         .contextMenu {
                             ClipActions(targets: model.selection.contains(clip.id) ? model.selectedClips : [clip])
@@ -182,10 +176,7 @@ struct ClipGrid: View {
         .onDeleteCommand {  // the Delete key and Edit ▸ Delete
             if model.canDelete, !model.selectedClips.isEmpty { model.clipsToRemove = model.selectedClips }
         }
-        .onKeyPress(.space) {  // like Finder, Space opens Quick Look
-            Task { await model.quickLook() }
-            return .handled
-        }
+        .onKeyPress(.space) { model.playSelectedClip() ? .handled : .ignored }
     }
 
     private nonisolated static let space = "clip-grid"

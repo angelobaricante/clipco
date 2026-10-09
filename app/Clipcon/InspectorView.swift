@@ -1,4 +1,3 @@
-import AVKit
 import SwiftUI
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -8,7 +7,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
-    @State private var player = PreviewPlayer()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -21,18 +20,26 @@ struct InspectorView: View {
             .padding(12)
             Divider()
             if let clip = model.selectedClip {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        SourcePreview(clip: clip, player: player)
-                        StatusBanner(clip: clip)
-                        switch model.inspectorTab {
-                        case .context: ContextSection(clip: clip, player: player)
-                        case .transcript: TranscriptSection(clip: clip)
-                        case .info: InfoSection(clip: clip, project: model.project)
+                let spoken = model.spokenLineID(in: clip)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            StatusBanner(clip: clip)
+                            switch model.inspectorTab {
+                            case .context: ContextSection(clip: clip, spoken: spoken)
+                            case .transcript: TranscriptSection(clip: clip, spoken: spoken)
+                            case .info: InfoSection(clip: clip, project: model.project)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: spoken) { _, line in  // keep the spoken line in view while it plays
+                        guard let line, model.inspectorTab == .transcript else { return }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(line, anchor: .center)
                         }
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else if model.selection.count > 1 {
                 ContentUnavailableView("\(model.selection.count) Clips Selected", systemImage: "square.stack",
@@ -42,92 +49,6 @@ struct InspectorView: View {
                                        description: Text("Select a clip to inspect its context."))
             }
         }
-    }
-}
-
-/// One AVPlayer for the inspector, pointed at the selected clip's verified original.
-@MainActor
-@Observable
-final class PreviewPlayer {
-    let player = AVPlayer()
-    private(set) var clipID: SourceClip.ID?
-    private var revision: Int?
-    private(set) var access: SourceAccess?
-
-    /// Checks the original again whenever the clip or its analysed revision changes.
-    func show(_ clip: SourceClip) async {
-        guard clip.id != clipID || clip.revision != revision || access == nil else { return }
-        clipID = clip.id
-        revision = clip.revision
-        access = nil
-        player.pause()
-        let checked = await SourceAccess.check(clip)
-        guard clipID == clip.id else { return }  // the selection moved on meanwhile
-        access = checked
-        if case .available(let url) = checked {
-            player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        } else {
-            player.replaceCurrentItem(with: nil)
-        }
-    }
-
-    /// Plays from a source-relative time of the shown clip.
-    func play(from seconds: Double) {
-        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero,
-                    toleranceAfter: .zero)
-        player.play()
-    }
-
-    var canPlay: Bool { if case .available = access { true } else { false } }
-}
-
-/// AppKit's standard AVKit player view. (SwiftUI's `VideoPlayer` aborts while loading its type metadata on
-/// macOS 26.5 in this build, so the AppKit view is hosted directly.)
-struct SystemPlayerView: NSViewRepresentable {
-    let player: AVPlayer
-
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.controlsStyle = .inline
-        view.player = player
-        return view
-    }
-
-    func updateNSView(_ view: AVPlayerView, context: Context) {
-        if view.player !== player { view.player = player }
-    }
-}
-
-/// Real playback of the original file, only after it is verified to be the one that was indexed.
-struct SourcePreview: View {
-    let clip: SourceClip
-    let player: PreviewPlayer
-
-    var body: some View {
-        Group {
-            switch player.access {
-            case .available?:
-                SystemPlayerView(player: player.player)
-                    .accessibilityLabel("Original \(clip.originalFilename)")
-            case nil:
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case let state?:
-                ContentUnavailableView {
-                    Label(state == .missing ? "Original Not Found" : state == .changed ? "Original Changed"
-                                                                                       : "Not Yet Verified",
-                          systemImage: "film.slash")
-                } description: {
-                    Text(state == .missing ? "The file is not at its indexed location."
-                         : state == .changed ? "The file changed since it was indexed, so it is not played."
-                         : "Playback is available once analysis has checked the source.")
-                }
-            }
-        }
-        .aspectRatio(16 / 9, contentMode: .fit)
-        .background(.quaternary, in: .rect(cornerRadius: 6))
-        .clipShape(.rect(cornerRadius: 6))
-        .task(id: clip.id) { await player.show(clip) }
-        .onChange(of: clip.revision) { Task { await player.show(clip) } }
     }
 }
 
@@ -209,9 +130,25 @@ struct CreatorControls: View {
     }
 }
 
+/// A transcript line, highlighted while the player is speaking it.
+struct SpokenLine: View {
+    let text: String
+    let isSpoken: Bool
+
+    var body: some View {
+        Text(text)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(isSpoken ? Color.accentColor.opacity(0.22) : .clear, in: .rect(cornerRadius: 4))
+            .accessibilityAddTraits(isSpoken ? .isSelected : [])
+            .accessibilityValue(isSpoken ? "Now playing" : "")
+    }
+}
+
 struct ContextSection: View {
+    @Environment(AppModel.self) private var model
     let clip: SourceClip
-    let player: PreviewPlayer
+    let spoken: Segment.Line.ID?
 
     var body: some View {
         CreatorControls(clip: clip).id(clip.id)
@@ -224,10 +161,11 @@ struct ContextSection: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(segment.label).font(.headline)
                     Spacer()
-                    Button("\(segment.start.timecode)–\(segment.end.timecode)") { player.play(from: segment.start) }
+                    Button("\(segment.start.timecode)–\(segment.end.timecode)") {
+                        Task { await model.openPlayer(clip.id, at: segment.start) }
+                    }
                         .buttonStyle(.link)
                         .font(.caption.monospacedDigit())
-                        .disabled(!player.canPlay)
                         .help("Play the original from \(segment.start.timecode)")
                         .accessibilityLabel("Play from \(segment.start.timecode) to \(segment.end.timecode)")
                 }
@@ -254,7 +192,7 @@ struct ContextSection: View {
                         Text("No speech detected").foregroundStyle(.secondary)
                     }
                     ForEach(segment.transcript) { line in
-                        Text("“\(line.text)”")
+                        SpokenLine(text: "“\(line.text)”", isSpoken: line.id == spoken)
                     }
                 }
                 if !segment.relationships.isEmpty {
@@ -303,7 +241,9 @@ struct EvidenceGroup<Content: View>: View {
 }
 
 struct TranscriptSection: View {
+    @Environment(AppModel.self) private var model
     let clip: SourceClip
+    let spoken: Segment.Line.ID?
 
     var body: some View {
         let lines = clip.segments.flatMap(\.transcript)
@@ -312,10 +252,15 @@ struct TranscriptSection: View {
         }
         ForEach(lines) { line in
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(line.start.timecode).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Button(line.start.timecode) { Task { await model.openPlayer(clip.id, at: line.start) } }
+                    .buttonStyle(.link)
+                    .font(.caption.monospacedDigit())
                     .frame(width: 52, alignment: .trailing)
-                Text(line.text).textSelection(.enabled)
+                    .help("Play from \(line.start.timecode)")
+                    .accessibilityLabel("Play from \(line.start.timecode)")
+                SpokenLine(text: line.text, isSpoken: line.id == spoken).textSelection(.enabled)
             }
+            .id(line.id)
         }
     }
 }

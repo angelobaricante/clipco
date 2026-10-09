@@ -16,6 +16,7 @@
 		CD1E75ACAE50BA641FCAFEFF /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701F40840D04F4E87AA0422F /* InspectorView.swift */; };
 		D3269EA7BDD799E7520CE78E /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15B06A3D2E75C1DABE5D9F3 /* Sheets.swift */; };
 		DD6C200D8EB3B38B4FF57DCA /* AutomationRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = F600F10137054C9C5455D31F /* AutomationRun.swift */; };
+		F239FAE40DF8EF5341C29557 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2346E8F8F2A678135B1022D /* PlayerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		6CB60F6DCA37127977BD9262 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		701F40840D04F4E87AA0422F /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
 		934BEE3D01D3B0ACF9233598 /* ClipconApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipconApp.swift; sourceTree = "<group>"; };
+		B2346E8F8F2A678135B1022D /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		D8DB14E2B061247011BDB5E9 /* WorkerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerClient.swift; sourceTree = "<group>"; };
 		E15B06A3D2E75C1DABE5D9F3 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
 		F600F10137054C9C5455D31F /* AutomationRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationRun.swift; sourceTree = "<group>"; };
@@ -59,6 +61,7 @@
 				18C82248B9342F6037C6EAA0 /* ContentView.swift */,
 				61DA1317040A7E84DEAAABE2 /* Info.plist */,
 				701F40840D04F4E87AA0422F /* InspectorView.swift */,
+				B2346E8F8F2A678135B1022D /* PlayerView.swift */,
 				E15B06A3D2E75C1DABE5D9F3 /* Sheets.swift */,
 				D8DB14E2B061247011BDB5E9 /* WorkerClient.swift */,
 				F95B6881F8025E59DD72D1B6 /* WorkerModels.swift */,
@@ -127,6 +130,7 @@
 				C8AB1EA0A246907F097BC95F /* ClipconApp.swift in Sources */,
 				2FB3CBB6B9AE4D7AE1962281 /* ContentView.swift in Sources */,
 				CD1E75ACAE50BA641FCAFEFF /* InspectorView.swift in Sources */,
+				F239FAE40DF8EF5341C29557 /* PlayerView.swift in Sources */,
 				D3269EA7BDD799E7520CE78E /* Sheets.swift in Sources */,
 				2B633048966C527EA282CBA4 /* WorkerClient.swift in Sources */,
 				1346B8D7956A031EEB2F9BFF /* WorkerModels.swift in Sources */,

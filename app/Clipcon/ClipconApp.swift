@@ -38,6 +38,9 @@ struct ClipconApp: App {
             }
             CommandMenu("Clip") {
                 let targets = model.commandTargets
+                Button("Play") { _ = model.playSelectedClip() }
+                    .keyboardShortcut(.downArrow, modifiers: .command)
+                    .disabled(model.selectedClip == nil)
                 Button("Quick Look") { Task { await model.quickLook() } }
                     .keyboardShortcut("y", modifiers: .command)
                     .disabled(model.selectedClip == nil)

@@ -78,6 +78,9 @@ final class AppModel {
     var browserMode: BrowserMode = .grid
     /// The original shown in the system Quick Look panel (Space, or double-click), once its source is verified.
     var quickLookURL: URL?
+    let player = PreviewPlayer()
+    /// The clip playing over the browser (double-click or Space); nil when the player is closed.
+    var playingClipID: SourceClip.ID?
     /// Incremented to move keyboard focus to the toolbar search field (⌘F).
     var searchFocusRequest = 0
     var inspectorTab: InspectorTab = .context
@@ -198,16 +201,44 @@ final class AppModel {
     /// Opens the selected clip's original in Quick Look after checking it is the file that was indexed.
     func quickLook() async {
         guard let clip = selectedClip else { return }
-        switch await SourceAccess.check(clip) {
-        case .available(let url): quickLookURL = url
-        case .missing: errorMessage = "\(clip.originalFilename) is not at its indexed location."
-        case .changed: errorMessage = "\(clip.originalFilename) changed since it was indexed; re-analyse it first."
-        case .unverified: errorMessage = "\(clip.originalFilename) has not been checked by analysis yet."
+        let access = await SourceAccess.check(clip)
+        if case .available(let url) = access { quickLookURL = url } else {
+            errorMessage = "\(clip.originalFilename): \(access.detail)"
         }
+    }
+
+    /// Opens the player over the browser for one clip (optionally from a source-relative time). The inspector
+    /// stays beside it showing that clip.
+    func openPlayer(_ id: SourceClip.ID, at seconds: Double? = nil) async {
+        guard let clip = clips.first(where: { $0.id == id }) else { return }
+        if selection != [id] { select(id) }
+        playingClipID = id
+        await player.show(clip)
+        guard playingClipID == id, case .available? = player.access else { return }
+        player.play(from: seconds ?? player.currentTime ?? 0)
+    }
+
+    /// Space in the browser: plays the one selected clip. Returns false when there is nothing to play.
+    func playSelectedClip() -> Bool {
+        guard let id = selectedClip?.id else { return false }
+        Task { await openPlayer(id) }
+        return true
+    }
+
+    func closePlayer() {
+        player.pause()
+        playingClipID = nil
+    }
+
+    /// The transcript line spoken at the player's position, while the player shows this clip.
+    func spokenLineID(in clip: SourceClip) -> Segment.Line.ID? {
+        guard playingClipID == clip.id, player.clipID == clip.id, let t = player.currentTime else { return nil }
+        return clip.segments.lazy.flatMap(\.transcript).first { $0.start <= t && t < $0.end }?.id
     }
 
     func open(_ project: Project) async throws {
         guard project.id != self.project?.id else { return }
+        closePlayer()
         self.project = project
         clips = []
         select(nil)
