@@ -1,11 +1,14 @@
 """Real speech + vision smoke test through the worker CLI the app uses.
 
-Requires whisper.cpp, the ggml English Small model, and a running local Ollama with
+Requires whisper.cpp, the multilingual ggml large-v3-turbo model, and a running local Ollama with
 qwen3.5:4b-q4_K_M. Run with: uv run pytest -m real -s
-The clip is synthesised locally: macOS speech synthesis over a system desktop photo.
+The English clip is synthesised locally: macOS speech synthesis over a system desktop photo.
+macOS has no Tagalog voice, so the Tagalog check runs on a real clip you supply:
+  CLIPCON_TAGALOG_CLIP=/path/to/tagalog-or-taglish.mp4 uv run pytest -m real -s -k tagalog
 """
 
 import json
+import os
 import resource
 import subprocess
 import sys
@@ -70,6 +73,7 @@ def test_real_speech_and_vision_context(tmp_path):
     assert saved["status"] == "ready"
     spoken = " ".join(t["text"] for s in saved["segments"] for t in s["transcript"]).lower()
     assert "water filter" in spoken and "actually" in spoken
+    assert saved["speech_language"] == "en"
     for seg in saved["segments"]:
         assert 0 <= seg["start"] < seg["end"] <= saved["duration"]
         for t in seg["transcript"]:
@@ -100,3 +104,27 @@ def test_real_speech_and_vision_context(tmp_path):
                             for s in saved["segments"]],
     }
     print("\nSMOKE REPORT " + json.dumps(report, indent=2))
+
+
+@pytest.mark.skipif(not os.environ.get("CLIPCON_TAGALOG_CLIP"), reason="set CLIPCON_TAGALOG_CLIP to a real clip")
+def test_real_tagalog_speech_is_detected_and_transcribed(tmp_path):
+    clip = Path(os.environ["CLIPCON_TAGALOG_CLIP"]).expanduser()
+    original = sha256(clip)
+    home = tmp_path / "home"
+    assert worker(home, "warmup")[-1]["readiness"]["state"] == "ready"
+    project = worker(home, "create-project", "--name", "Tagalog check")[-1]["project"]
+
+    started = time.monotonic()
+    worker(home, "import", "--project", project["id"], str(clip))
+    elapsed = time.monotonic() - started
+
+    [saved] = worker(home, "snapshot", "--project", project["id"])[-1]["snapshot"]["clips"]
+    assert saved["status"] == "ready"
+    assert saved["speech_language"] == "tl"
+    assert sha256(clip) == original
+    print("\nTAGALOG REPORT " + json.dumps({
+        "clip_duration_s": round(saved["duration"], 1), "import_elapsed_s": round(elapsed, 1),
+        "transcript": [f"[{t['start']:.1f}-{t['end']:.1f}] {t['text']}"
+                       for s in saved["segments"] for t in s["transcript"]],
+        "interpretations": [s["interpretation"]["text"] for s in saved["segments"]],
+    }, indent=2, ensure_ascii=False))

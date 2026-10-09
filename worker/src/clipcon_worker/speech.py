@@ -18,19 +18,39 @@ class TranscriptSpan:
     text: str
 
 
+@dataclass(frozen=True)
+class Transcript:
+    spans: list[TranscriptSpan]
+    language: str | None  # as detected (or forced) by whisper, e.g. "en", "tl"
+
+
+# A punctuated Taglish initial prompt: large-v3-turbo otherwise tends to drop punctuation and casing,
+# and an English-only prompt would bias language detection away from Tagalog.
+INITIAL_PROMPT = "Hello, everyone. Kumusta kayo? Today, ipapakita ko kung paano ito gumagana."
+
+
+# Cap on previous-text context carried between decoding windows. Unlimited context let large-v3-turbo
+# loop on Taglish footage; 0 also discards the initial prompt (and with it punctuation). 64 kept both
+# behaviours on the English and Taglish clips measured on Oct 9.
+MAX_CONTEXT_TOKENS = 64
+
+
 class WhisperCppSpeech:
-    def __init__(self, model_path: Path, binary: str = "whisper-cli", language: str = "en"):
+    def __init__(self, model_path: Path, binary: str = "whisper-cli", language: str = "auto",
+                 prompt: str = INITIAL_PROMPT):
+        """language: a whisper language code ("en", "tl") or "auto" to detect it per clip."""
         self.model_path = Path(model_path)
         self.binary = binary
         self.language = language
+        self.prompt = prompt
 
     @property
     def identity(self) -> dict:
         return {"engine": "whisper.cpp", "model": self.model_path.name,
                 "model_bytes": self.model_path.stat().st_size if self.model_path.exists() else None,
-                "language": self.language}
+                "language": self.language, "prompt": self.prompt, "max_context": MAX_CONTEXT_TOKENS}
 
-    def transcribe(self, wav_path: Path) -> list[TranscriptSpan]:
+    def transcribe(self, wav_path: Path) -> Transcript:
         if not self.model_path.exists():
             raise SpeechError(f"whisper model missing: {self.model_path}")
         with tempfile.TemporaryDirectory() as tmp:
@@ -38,7 +58,7 @@ class WhisperCppSpeech:
             try:
                 subprocess.run(
                     [self.binary, "-m", str(self.model_path), "-f", str(wav_path), "-l", self.language,
-                     "-oj", "-of", str(base), "-np"],
+                     "--prompt", self.prompt, "-mc", str(MAX_CONTEXT_TOKENS), "-oj", "-of", str(base), "-np"],
                     check=True, capture_output=True, text=True,
                 )
             except FileNotFoundError as e:
@@ -49,8 +69,8 @@ class WhisperCppSpeech:
         spans = []
         for item in data.get("transcription", []):
             text = item.get("text", "").strip()
-            if not text or text.startswith("[") and text.endswith("]"):  # e.g. [BLANK_AUDIO], [Music]
+            if not text:
                 continue
             offsets = item["offsets"]
             spans.append(TranscriptSpan(offsets["from"] / 1000, offsets["to"] / 1000, text))
-        return spans
+        return Transcript(spans, data.get("result", {}).get("language"))

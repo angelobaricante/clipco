@@ -115,3 +115,51 @@ def test_an_interpretation_citing_no_supplied_evidence_is_not_saved(home, clip):
     assert vision.calls == 2  # one retry, then the clip fails
     [saved] = worker.snapshot(project["id"])["clips"]
     assert saved["status"] == "failed" and saved["segments"] == []
+
+
+def test_the_detected_spoken_language_is_saved_with_the_clip(home, clip):
+    from clipcon_worker.speech import TranscriptSpan
+
+    taglish = [TranscriptSpan(0.0, 5.0, "Ngayon, ipapakita ko kung paano gumagana ang water filter."),
+               TranscriptSpan(5.0, 11.0, "Actually, hindi chamber, yung upper tank pala.")]
+    worker = Worker(home, speech=RecordedSpeech(taglish, language="tl"), vision=RecordedVision())
+    project = worker.create_project("Water filter")
+
+    worker.import_clip(project["id"], clip)
+
+    [saved] = worker.snapshot(project["id"])["clips"]
+    assert saved["speech_language"] == "tl"
+    spoken = [t["text"] for s in saved["segments"] for t in s["transcript"]]
+    assert "Actually, hindi chamber, yung upper tank pala." in spoken
+
+
+def test_non_speech_annotations_are_not_saved_as_transcript(home, clip):
+    from clipcon_worker.speech import TranscriptSpan
+
+    spans = [TranscriptSpan(0.0, 3.0, "(speaking in foreign language)"),
+             TranscriptSpan(3.0, 6.0, "[BLANK_AUDIO]"),
+             TranscriptSpan(6.0, 9.0, "Ito yung upper tank."),
+             TranscriptSpan(9.0, 11.0, "[Music]")]
+    worker = Worker(home, speech=RecordedSpeech(spans, language="tl"), vision=RecordedVision())
+    project = worker.create_project("Water filter")
+
+    worker.import_clip(project["id"], clip)
+
+    [saved] = worker.snapshot(project["id"])["clips"]
+    assert [t["text"] for s in saved["segments"] for t in s["transcript"]] == ["Ito yung upper tank."]
+
+
+def test_a_repetition_loop_from_speech_recognition_is_collapsed(home, clip):
+    from clipcon_worker.speech import TranscriptSpan
+
+    looped = [TranscriptSpan(0.0, 2.0, "Tapos pipilihin ni ate doon."),
+              TranscriptSpan(2.0, 3.0, "Check."), TranscriptSpan(3.0, 4.0, "Check."),  # a real short repeat stays
+              *[TranscriptSpan(4.0 + i, 5.0 + i, "Wala, nage-handlet dito.") for i in range(7)]]
+    worker = Worker(home, speech=RecordedSpeech(looped, language="tl"), vision=RecordedVision())
+    project = worker.create_project("Site visit")
+
+    worker.import_clip(project["id"], clip)
+
+    [saved] = worker.snapshot(project["id"])["clips"]
+    lines = [t["text"] for s in saved["segments"] for t in s["transcript"]]
+    assert lines == ["Tapos pipilihin ni ate doon.", "Check.", "Check.", "Wala, nage-handlet dito."]

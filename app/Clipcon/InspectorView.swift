@@ -163,6 +163,7 @@ struct InfoSection: View {
                 if let d = clip.duration { LabeledContent("Duration", value: d.timecode) }
                 if let w = clip.width, let h = clip.height { LabeledContent("Resolution", value: "\(w)×\(h)") }
                 if let fps = clip.fps { LabeledContent("Frame rate", value: String(format: "%.2f fps", fps)) }
+                if let language = clip.speechLanguageName { LabeledContent("Spoken language", value: "\(language) (detected)") }
                 LabeledContent("Codecs", value: [clip.videoCodec, clip.audioCodec].compactMap { $0 }
                     .joined(separator: " / "))
                 if let role = clip.role {

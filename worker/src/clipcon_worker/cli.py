@@ -17,7 +17,7 @@ from .speech import WhisperCppSpeech
 from .vision import OllamaVision
 
 DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipcon"
-DEFAULT_WHISPER = Path.home() / ".clipcon" / "models" / "ggml-small.en.bin"
+DEFAULT_WHISPER = Path.home() / ".clipcon" / "models" / "ggml-large-v3-turbo.bin"  # multilingual
 DEFAULT_VISION = "qwen3.5:4b-q4_K_M"
 
 
@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", type=Path, default=Path(os.environ.get("CLIPCON_HOME", DEFAULT_HOME)))
     parser.add_argument("--whisper-model", type=Path,
                         default=Path(os.environ.get("CLIPCON_WHISPER_MODEL", DEFAULT_WHISPER)))
+    parser.add_argument("--speech-language", default=os.environ.get("CLIPCON_SPEECH_LANGUAGE", "auto"),
+                        help='whisper language code, e.g. "en" or "tl"; "auto" detects it per clip')
     parser.add_argument("--vision-model", default=os.environ.get("CLIPCON_VISION_MODEL", DEFAULT_VISION))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("readiness")
@@ -54,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             final = warm_up(ollama, args.whisper_model, progress=lambda s: emit("readiness", readiness=s))
             emit("result", readiness=final)
         else:
-            worker = Worker(args.home, WhisperCppSpeech(args.whisper_model), ollama)
+            worker = Worker(args.home, WhisperCppSpeech(args.whisper_model, language=args.speech_language), ollama)
             if args.command == "projects":
                 emit("result", projects=worker.store.projects())
             elif args.command == "create-project":

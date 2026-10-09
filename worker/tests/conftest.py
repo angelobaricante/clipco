@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from clipcon_worker.speech import TranscriptSpan
+from clipcon_worker.speech import Transcript, TranscriptSpan
 
 
 def make_clip(path: Path, seconds: float = 12.0) -> Path:
@@ -31,14 +31,15 @@ class RecordedSpeech:
 
     identity = {"engine": "recorded-speech", "model": "fixture"}
 
-    def __init__(self, spans):
+    def __init__(self, spans, language: str = "en"):
         self.spans = spans
+        self.language = language
         self.calls = 0
 
     def transcribe(self, wav_path: Path):
         self.calls += 1
         assert wav_path.exists()
-        return list(self.spans)
+        return Transcript(list(self.spans), self.language)
 
 
 class RecordedVision:

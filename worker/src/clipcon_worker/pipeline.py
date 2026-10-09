@@ -16,7 +16,7 @@ from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailabl
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
-    "version": 1,
+    "version": 4,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard
     "segment_target_seconds": 30.0,
     "silent_segment_seconds": 10.0,
     "frames_per_segment": 2,
@@ -39,14 +39,38 @@ def fingerprint(path: Path) -> str:
     return h.hexdigest()
 
 
+def is_annotation(text: str) -> bool:
+    """Whisper's non-speech markers, e.g. [BLANK_AUDIO], [Music], (speaking in foreign language)."""
+    text = text.strip()
+    return (text.startswith("[") and text.endswith("]")) or (text.startswith("(") and text.endswith(")"))
+
+
+# Whisper can fall into a decoding loop that repeats one line until the audio ends. A run this long of
+# identical consecutive lines is treated as that failure: the first line is kept, the rest dropped.
+REPETITION_LOOP_RUN = 4
+
+
+def collapse_repetition_loops(spans: list[TranscriptSpan]) -> list[TranscriptSpan]:
+    kept: list[TranscriptSpan] = []
+    i = 0
+    while i < len(spans):
+        j = i
+        while j + 1 < len(spans) and spans[j + 1].text.casefold() == spans[i].text.casefold():
+            j += 1
+        run = spans[i:j + 1]
+        kept.extend(run[:1] if len(run) >= REPETITION_LOOP_RUN else run)
+        i = j + 1
+    return kept
+
+
 def clean_spans(spans: list[TranscriptSpan], duration: float) -> list[TranscriptSpan]:
-    """Keep only spans with valid source-relative bounds; clamp alignment overrun at the end."""
+    """Keep only actual speech with valid source-relative bounds; clamp alignment overrun at the end."""
     kept = []
     for s in sorted(spans, key=lambda s: s.start):
         start, end = max(0.0, s.start), min(s.end, duration)
-        if start < end and s.text.strip():
+        if start < end and s.text.strip() and not is_annotation(s.text):
             kept.append(TranscriptSpan(start, end, s.text.strip()))
-    return kept
+    return collapse_repetition_loops(kept)
 
 
 def plan_segments(duration: float, spans: list[TranscriptSpan], recipe: dict) -> list[tuple[float, float, list]]:
@@ -154,12 +178,14 @@ class Worker:
         frames_dir.mkdir(parents=True)
         try:
             spans: list[TranscriptSpan] = []
+            language = None
             if info.has_audio:
                 with tempfile.TemporaryDirectory() as tmp:
                     stage("extracting_audio")
                     wav = media.extract_audio(source, Path(tmp) / "audio.wav")
                     stage("transcribing")
-                    spans = clean_spans(self.speech.transcribe(wav), info.duration)
+                    transcript = self.speech.transcribe(wav)
+                    spans, language = clean_spans(transcript.spans, info.duration), transcript.language
             planned = plan_segments(info.duration, spans, recipe)
             per_segment = recipe["frames_per_segment"]
             if len(planned) * per_segment > recipe["max_frames"]:
@@ -203,6 +229,7 @@ class Worker:
                 "duration": info.duration, "width": info.width, "height": info.height, "fps": info.fps,
                 "video_codec": info.video_codec, "audio_codec": info.audio_codec,
                 "label": segments[0]["label"],
+                "speech_language": language,
                 "role": "a-roll" if is_a_roll else "b-roll",
                 "role_basis": f"speech covers {speech_seconds / info.duration:.0%} of the clip",
             },

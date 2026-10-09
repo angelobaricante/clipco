@@ -49,11 +49,17 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     var label: String?
     var role: String?
     var roleBasis: String?
+    var speechLanguage: String?
     var revision: Int
     var analysis: Analysis?
     var segments: [Segment]
 
     var displayLabel: String { label ?? originalFilename }
+
+    /// Whisper's language code as a readable name, e.g. "tl" → "Tagalog".
+    var speechLanguageName: String? {
+        speechLanguage.map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+    }
     var thumbnailPath: String? { segments.first?.observations.first?.frame.path }
 }
 

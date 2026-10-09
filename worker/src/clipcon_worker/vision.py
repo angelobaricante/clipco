@@ -80,6 +80,7 @@ Return JSON only:
 - observations: one entry per frame, describing only what is visible in that still frame. Use the given frame_id. Do not guess what happens between frames.
 - interpretation: one or two sentences on what this range is about, combining speech and visuals. Say when something is uncertain.
 - evidence_ids: the frame and transcript IDs that support your interpretation. Only use IDs you were given.
+The transcript may be in English, Tagalog (Filipino), or a mix (Taglish). Understand it as spoken; write label, observations and interpretation in English.
 Never invent timestamps, IDs, quantities, or details that are not visible or spoken."""
 
 

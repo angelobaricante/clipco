@@ -29,7 +29,7 @@ Later sessions use the next unblocked implementation issue. GitHub issues and th
 
 ## Demo boundaries
 
-The initial target is a configured Apple Silicon Mac and English footage. Initial runtime/model installation requires connectivity; useful local inference and index retrieval must then work offline. Codex's own remote inference may require internet. Preserve original footage, measure efficiency fairly, and distinguish live processing from cached context.
+The initial target is a configured Apple Silicon Mac with English and Tagalog/Taglish footage. Initial runtime/model installation requires connectivity; useful local inference and index retrieval must then work offline. Codex's own remote inference may require internet. Preserve original footage, measure efficiency fairly, and distinguish live processing from cached context.
 
 Model weights, raw footage, local indexes, and environment-specific caches are kept outside Git.
 
@@ -40,8 +40,9 @@ Verified on an M5 Mac (24 GB) with macOS 26.5.1 and Xcode 26.3. These are one-ti
 ```sh
 brew install ffmpeg ollama whisper-cpp uv xcodegen
 mkdir -p ~/.clipcon/models ~/.clipcon/logs
-curl -L -o ~/.clipcon/models/ggml-small.en.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+# Multilingual speech (English, Tagalog, Taglish), ~1.6 GB
+curl -L -o ~/.clipcon/models/ggml-large-v3-turbo.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
 # Local Ollama: loopback only, cloud features disabled
 OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 ollama serve > ~/.clipcon/logs/ollama.log 2>&1 &
 ollama pull qwen3.5:4b-q4_K_M
@@ -63,5 +64,7 @@ cd worker
 uv run pytest                 # behavioral import/readiness checks (real FFmpeg, recorded inference)
 uv run pytest -m real -s      # real whisper.cpp + Ollama smoke test; prints a timing/model report
 ```
+
+Speech language is detected per clip (`CLIPCON_SPEECH_LANGUAGE=auto`); force it with `en` or `tl`. To fall back to the smaller English-only model, download `ggml-small.en.bin` and set `CLIPCON_WHISPER_MODEL=~/.clipcon/models/ggml-small.en.bin`. Tagalog/Taglish quality is only as good as measured on real footage; run `CLIPCON_TAGALOG_CLIP=/path/clip.mp4 uv run pytest -m real -s -k tagalog`.
 
 The worker CLI is also usable directly: `uv run clipcon-worker readiness|warmup|projects|create-project|import|snapshot`.

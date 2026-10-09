@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS source_clips (
   status TEXT NOT NULL CHECK (status IN ('pending','indexing','ready','failed','stale','missing')),
   stage TEXT, error TEXT,
   duration REAL, width INTEGER, height INTEGER, fps REAL, video_codec TEXT, audio_codec TEXT,
-  label TEXT, role TEXT, role_basis TEXT,
+  label TEXT, role TEXT, role_basis TEXT, speech_language TEXT,
   revision INTEGER NOT NULL DEFAULT 0, analysis_key TEXT,
   created_at REAL NOT NULL, updated_at REAL NOT NULL,
   UNIQUE (project_id, source_path)
@@ -54,6 +54,9 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(source_clips)")}
+        if "speech_language" not in columns:  # indexes created before multilingual speech
+            self.db.execute("ALTER TABLE source_clips ADD COLUMN speech_language TEXT")
 
     def create_project(self, project_id: str, name: str, context: str) -> dict:
         self.db.execute("INSERT INTO projects VALUES (?,?,?,?)", (project_id, name, context, time.time()))
