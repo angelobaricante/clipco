@@ -6,13 +6,15 @@ This page lists what has been measured, how to reproduce it, and what still need
 
 | Claim | Status | Evidence |
 | --- | --- | --- |
-| Local indexing and search with the internet unreachable | **Process-level proof done.** Machine-level run (Wi-Fi off) is still for the creator to do. | [`evidence/offline-proof-sandbox-2026-10-10.json`](evidence/offline-proof-sandbox-2026-10-10.json) |
+| Local indexing and search with the internet unreachable | **Process-level proof done** (agent-verified). **Machine-level run (Wi-Fi off) done manually by the creator** on 2026-10-10; its report and screenshots are kept by the creator and are not in this repository. | [`evidence/offline-proof-sandbox-2026-10-10.json`](evidence/offline-proof-sandbox-2026-10-10.json) |
 | Codex retrieves footage context through MCP | Done in #3/#4 (real Codex sessions, `codex-cli 0.162.0-alpha.2`) | Issues #3, #4 |
-| Correction-plus-B-roll query through Codex MCP | **Not demonstrated.** No corpus with a spoken correction has been recorded yet. | — |
-| Discovery tokens: direct inspection vs. MCP | **Harness built, not run.** The creator chose not to spend Codex credits or send footage yet. | `clipcon-benchmark` (below) |
+| Correction-plus-B-roll query through Codex MCP | **Done manually by the creator** on 2026-10-10. The session and recording are kept by the creator and were not reviewed by the agent. | — |
+| Discovery tokens: direct inspection vs. MCP | **Not run.** The creator decided not to benchmark for this submission. The harness stays available. | `clipcon-benchmark` (below) |
 | Warm retrieval latency | Measured: 1–5 ms per MCP tool call | Below |
 
-No token savings are claimed until the benchmark has been run and its answers graded.
+**No token savings are claimed.** The benchmark was not run.
+
+Rows marked "done manually by the creator" were reported by the creator. The agent did not inspect that evidence, so this page quotes no timings or results from those runs.
 
 ### Offline proof, process level (2026-10-10 00:01 Asia/Manila)
 
@@ -155,13 +157,13 @@ Setup and run instructions: [README](../README.md).
 
 ## Submission checklist (creator)
 
-- [ ] Confirm the organizer's authoritative cutoff and time zone (planning assumption: 2026-10-10 10:00 Asia/Manila). Keep the buffer.
-- [ ] Machine-level offline proof run, with the report saved and screenshot/recording taken.
-- [ ] Codex correction-plus-B-roll query recorded, if a correction corpus exists. Otherwise, state that it wasn't demonstrated.
-- [ ] Benchmark run and graded, or explicitly reported as not run.
-- [ ] Screenshots: workspace, inspector, offline verdict, Codex tool calls.
-- [ ] Short screen recording of the demo path.
-- [ ] Repository check: no raw footage, model weights, local indexes or personal paths committed (`git ls-files`, plus a review of `docs/evidence/`).
-- [ ] README states what was and wasn't demonstrated.
+- [x] Confirm the organizer's authoritative cutoff and time zone (planning assumption: 2026-10-10 10:00 Asia/Manila). Keep the buffer.
+- [x] Machine-level offline proof run, with the report saved and screenshot/recording taken (creator, manually).
+- [x] Codex correction-plus-B-roll query recorded (creator, manually).
+- [x] Benchmark explicitly reported as not run. No savings claimed.
+- [x] Screenshots: workspace, inspector, offline verdict, Codex tool calls (creator, manually).
+- [x] Short screen recording of the demo path (creator, manually).
+- [x] Repository check: no raw footage, model weights, local indexes or personal paths committed (`git ls-files`, plus a review of `docs/evidence/`).
+- [x] README states what was and wasn't demonstrated.
 - [ ] Disclosures above confirmed against the hackathon rules.
 - [ ] Submit once, yourself. Single-submission constraint: check everything before submitting.

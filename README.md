@@ -16,8 +16,9 @@ Tasks #2–#6 are complete:
 - recovery of missing and changed footage.
 
 Task #7 status:
-- Local indexing and search with outbound network denied are shown at process level.
-- The machine-level offline run and the token benchmark are ready for the creator to run. Until then, no savings are claimed.
+- Local indexing and search with outbound network denied are shown at process level (agent-verified evidence in `docs/evidence/`).
+- The creator ran the machine-level offline proof (Wi-Fi off) and the Codex correction-plus-B-roll query manually. That evidence is kept by the creator and is not in this repository.
+- The token benchmark was not run. **No savings are claimed.**
 
 See [docs/DEMO.md](docs/DEMO.md) for evidence, the demo path, versions and licenses, and the submission checklist. The image below is an approved browser design study with illustrative media, not a running native app.
 
