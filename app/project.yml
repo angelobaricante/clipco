@@ -1,0 +1,28 @@
+name: Clipcon
+options:
+  bundleIdPrefix: com.angelobaricante
+  deploymentTarget:
+    macOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+targets:
+  Clipcon:
+    type: application
+    platform: macOS
+    sources: [Clipcon]
+    info:
+      path: Clipcon/Info.plist
+      properties:
+        CFBundleDisplayName: Clipcon
+        LSApplicationCategoryType: public.app-category.video
+        NSHumanReadableCopyright: ""
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.angelobaricante.clipcon
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        # Dev demo: the app launches the local Python worker and reads chosen footage, so no App Sandbox.
+        ENABLE_APP_SANDBOX: NO
