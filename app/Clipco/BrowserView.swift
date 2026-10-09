@@ -7,6 +7,32 @@ struct BrowserView: View {
     private let columns = [GridItem(.adaptive(minimum: 200, maximum: 280), spacing: 16)]
 
     var body: some View {
+        browser
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if model.hasScope, !model.showingLibrary, model.trimmedQuery.isEmpty,
+                   [.all, .aRoll, .bRoll].contains(model.filter) {
+                    HStack {
+                        Text("\(model.visibleClips.count) \(model.visibleClips.count == 1 ? "clip" : "clips")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        @Bindable var model = model
+                        Picker("Footage role", selection: $model.filter) {
+                            Text("All Roles").tag(FootageFilter.all)
+                            Text("A-roll").tag(FootageFilter.aRoll)
+                            Text("B-roll").tag(FootageFilter.bRoll)
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize()
+                        .help("Filter by Segment role; a mixed clip can appear in both roles")
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(.bar)
+                }
+            }
+    }
+
+    @ViewBuilder private var browser: some View {
         if model.isLoadingScope || model.isStarting {
             ProgressView("Opening footage…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if !model.trimmedQuery.isEmpty {
@@ -177,7 +203,8 @@ struct ClipGrid: View {
                             frames[clip.id] = $0
                         }
                         .onTapGesture(count: 2) { Task { await model.openPlayer(clip.id) } }
-                        .onTapGesture { click(clip.id) }
+                        // Recognize selection independently of the double-click timeout.
+                        .simultaneousGesture(TapGesture().onEnded { click(clip.id) })
                         .id(clip.id)
                         .accessibilityAction { click(clip.id) }
                         .accessibilityAction(named: "Play") { Task { await model.openPlayer(clip.id) } }

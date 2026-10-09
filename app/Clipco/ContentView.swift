@@ -175,7 +175,11 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
         List(selection: Binding<SidebarItem?>(
-            get: { model.showingLibrary ? .library : .filter(model.filter) },
+            get: {
+                if model.showingLibrary { return .library }
+                // Roles refine the browser; they are not separate sidebar destinations.
+                return .filter([.aRoll, .bRoll].contains(model.filter) ? .all : model.filter)
+            },
             set: { item in
                 switch item {
                 case .library: Task { await model.openLibrary() }
@@ -198,10 +202,8 @@ struct SidebarView: View {
             })
         ) {
             if !model.showingLibrary {
-            Section(model.project?.name ?? "No Project") {
-                ForEach([FootageFilter.all, .aRoll, .bRoll]) { filter in
-                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
-                }
+            Section("Project") {
+                FilterRow(filter: .all, count: model.count(.all))
             }
             Section("Review") {
                 ForEach([FootageFilter.needsReview, .excluded]) { filter in
