@@ -21,6 +21,62 @@ private final class RunningProcess: @unchecked Sendable {
     func terminate() { if process.isRunning { process.terminate() } }
 }
 
+/// Resumes a waiter once the worker process has exited. `Process.waitUntilExit()` blocks a cooperative thread
+/// and can hang there after the process is gone; awaiting the termination handler does neither.
+private final class ExitSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exited = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func fire() {
+        lock.lock()
+        exited = true
+        let waiting = waiter
+        waiter = nil
+        lock.unlock()
+        waiting?.resume()
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if exited {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
+/// A worker's stdout as lines, read by its own readability handler. (`FileHandle.bytes` reads were observed to
+/// wait behind the long-running queue runner's quiet pipe, delaying unrelated calls by many seconds.)
+private final class LineReader: @unchecked Sendable {
+    private var buffer = Data()
+
+    static func lines(of handle: FileHandle) -> AsyncStream<String> {
+        let reader = LineReader()
+        return AsyncStream { continuation in
+            handle.readabilityHandler = { h in  // calls for one handle are serialized
+                let chunk = h.availableData
+                guard !chunk.isEmpty else {  // end of output
+                    if !reader.buffer.isEmpty { continuation.yield(String(decoding: reader.buffer, as: UTF8.self)) }
+                    h.readabilityHandler = nil
+                    continuation.finish()
+                    return
+                }
+                reader.buffer.append(chunk)
+                while let newline = reader.buffer.firstIndex(of: 0x0A) {
+                    continuation.yield(String(decoding: reader.buffer[..<newline], as: UTF8.self))
+                    reader.buffer.removeSubrange(...newline)
+                }
+            }
+        }
+    }
+}
+
 /// Runs the local Python worker as a subprocess and streams its JSON-lines events.
 /// All process and pipe work happens off the main actor.
 struct WorkerClient: Sendable {
@@ -53,9 +109,13 @@ struct WorkerClient: Sendable {
         // GUI apps start with a minimal PATH; FFmpeg and whisper.cpp come from Homebrew.
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
         process.environment = environment
+        // Reads and creator actions answer at once; the long-running queue runner yields to them.
+        process.qualityOfService = arguments.first == "run-queue" ? .utility : .userInitiated
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = Self.logHandle() ?? FileHandle.nullDevice
+        let exit = ExitSignal()
+        process.terminationHandler = { _ in exit.fire() }
         do {
             try process.run()
         } catch {
@@ -67,7 +127,7 @@ struct WorkerClient: Sendable {
         // A cancelled caller (e.g. a superseded search) stops its worker instead of leaving it running.
         let running = RunningProcess(process)
         try await withTaskCancellationHandler {
-            for try await line in stdout.fileHandleForReading.bytes.lines {
+            for await line in LineReader.lines(of: stdout.fileHandleForReading) {
                 guard let event = try? decoder.decode(WorkerEvent.self, from: Data(line.utf8)) else { continue }
                 last = event
                 if event.event == "progress" || event.event == "readiness" {
@@ -77,7 +137,7 @@ struct WorkerClient: Sendable {
         } onCancel: {
             running.terminate()
         }
-        process.waitUntilExit()
+        await exit.wait()
         try Task.checkCancellation()
         guard let last else { throw WorkerError.noResult }
         if last.event == "error" {
@@ -229,6 +289,37 @@ struct WorkerClient: Sendable {
     /// Points a clip at its original in a new location. The worker accepts only the same content.
     func relink(projectID: String, clipID: String, source: URL) async throws {
         _ = try await run(["relink", "--project", projectID, "--clip", clipID, source.path])
+    }
+
+    // The recoverable analysis queue
+
+    /// Registers videos (and every video in folders) in the destination at once and queues their analysis.
+    /// Needs no model or service; unsupported and inaccessible items come back as skipped.
+    func enqueue(projectID: String?, sources: [URL]) async throws -> WorkerEvent {
+        try await run(["enqueue"] + Self.destination(projectID) + sources.map(\.path))
+    }
+
+    /// Queues re-analysis or emotional-tone reading of clips the destination already has.
+    func enqueue(operation: String, projectID: String?, clipIDs: [String]) async throws -> WorkerEvent {
+        try await run(["enqueue-clips", "--operation", operation] + Self.destination(projectID) + clipIDs)
+    }
+
+    /// Runs queued jobs one at a time until none is left, the queue is paused, or setup is missing.
+    /// Returns at once when another runner already owns the queue.
+    func runQueue(onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
+        try await run(["run-queue"], onEvent: onProgress)
+    }
+
+    /// One of: jobs, reconcile, pause, resume, clear-jobs. Each returns the queue.
+    func queue(_ command: String) async throws -> QueueState {
+        guard let q = try await run([command]).queue else { throw WorkerError.noResult }
+        return q
+    }
+
+    /// cancel or retry-jobs for chosen jobs; returns the queue.
+    func queue(_ command: String, jobIDs: [String]) async throws -> QueueState {
+        guard let q = try await run([command] + jobIDs).queue else { throw WorkerError.noResult }
+        return q
     }
 
     func importClip(projectID: String, source: URL,

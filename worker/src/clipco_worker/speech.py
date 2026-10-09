@@ -6,6 +6,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import cancel
+
 
 class SpeechError(Exception):
     pass
@@ -63,11 +65,10 @@ class WhisperCppSpeech:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "transcript"
             try:
-                subprocess.run(
+                cancel.run(  # stopped if the creator cancels the job
                     [self.binary, "-m", str(self.model_path), "-f", str(wav_path), "-l", self.language,
                      "--prompt", self.prompt, "-mc", str(MAX_CONTEXT_TOKENS), "-oj", "-of", str(base), "-np",
                      "--vad", "-vm", str(self.vad_model_path)],
-                    check=True, capture_output=True, text=True,
                 )
             except FileNotFoundError as e:
                 raise SpeechError(f"{self.binary} is not installed") from e

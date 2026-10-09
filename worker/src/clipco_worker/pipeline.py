@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -136,6 +137,36 @@ def frame_times(start: float, end: float, per_segment: int) -> list[float]:
     span = end - start
     n = 1 if span < 4 else per_segment
     return [round(start + span * (i + 1) / (n + 1), 3) for i in range(n)]
+
+
+def discover(paths: list[Path]) -> tuple[list[Path], list[dict]]:
+    """Every video among chosen files and inside chosen folders (and their subfolders, skipping hidden ones), and
+    what was left out: {"path", "reason": "unsupported" | "inaccessible"}. Clips are identified by their resolved
+    original path, as import_clip does, so a linked, overlapping or twice-chosen file is one clip."""
+    found: set[Path] = set()
+    skipped: dict[Path, str] = {}
+    for path in (Path(p).expanduser().resolve() for p in paths):
+        if path.is_dir():
+            try:
+                found |= {p for p in path.rglob("*")
+                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
+            except OSError:
+                skipped[path] = "inaccessible"
+        elif path.is_file():
+            found.add(path)
+        else:
+            skipped[path] = "inaccessible"
+    sources = set()
+    for p in found:
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in VIDEO_SUFFIXES:
+            skipped[p] = "unsupported"
+        elif not os.access(p, os.R_OK):
+            skipped[p] = "inaccessible"
+        else:
+            sources.add(p.resolve())
+    return sorted(sources), [{"path": str(p), "reason": r} for p, r in sorted(skipped.items())]
 
 
 class Worker:
@@ -483,16 +514,7 @@ class Worker:
         report = progress or (lambda stage, detail: None)
         if project_id is not None and self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
-        found: set[Path] = set()
-        for path in (Path(p).expanduser().resolve() for p in paths):
-            if path.is_dir():
-                found |= {p for p in path.rglob("*")
-                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
-            else:
-                found.add(path)
-        # Clips are identified by their resolved original path, as import_clip does, so a linked or twice-chosen
-        # file is one clip.
-        sources = sorted({p.resolve() for p in found if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES})
+        sources, _ = discover(paths)
         if not sources:
             raise ValueError("no video files in the chosen items")
         registered = []

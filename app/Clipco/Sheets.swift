@@ -54,7 +54,8 @@ struct ImportSheet: View {
             }
             if let r = model.readiness, !model.canAnalyze {
                 Section {
-                    Label(r.detail, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Label("Footage is added now and waits to be analysed: \(r.detail)",
+                          systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Text(r.guidance).font(.caption).textSelection(.enabled)
                 }
             }
@@ -67,7 +68,7 @@ struct ImportSheet: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Analyze") {
+                Button("Add to Queue") {
                     guard !sources.isEmpty else { return }
                     let projectName = creatingProject ? name.trimmingCharacters(in: .whitespaces) : nil
                     let context = context
@@ -75,8 +76,7 @@ struct ImportSheet: View {
                     let chosen = sources
                     Task { await model.importFootage(chosen, newProjectName: projectName, context: context) }
                 }
-                .disabled(sources.isEmpty || (creatingProject && name.trimmingCharacters(in: .whitespaces).isEmpty)
-                          || !model.canAnalyze || model.activity != nil)
+                .disabled(sources.isEmpty || (creatingProject && name.trimmingCharacters(in: .whitespaces).isEmpty))
             }
         }
         .task { await model.refreshReadiness() }

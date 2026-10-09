@@ -210,8 +210,136 @@ enum AutomationRun {
         try? data?.write(to: out.appending(path: "report.json"))
     }
 
+    /// The recoverable queue in the real app, through the same model calls as a Finder drop, New Project's Create,
+    /// and the Activity popover's Pause/Resume/Cancel controls. Run it against a scratch CLIPCO_HOME:
+    ///
+    ///   CLIPCO_HOME=/tmp/home Clipco -ClipcoAutomationQueue "/a/folder|/b/clip.mov|/c/library-clip.mp4"
+    ///     -ClipcoAutomationOut /tmp/out [-ClipcoAutomationHold 6]
+    ///
+    /// All but the last path are dropped on the empty workspace; the last is dropped on the Reusable B-roll view.
+    static func queue(_ model: AppModel, sources: [URL], out: URL, defaults: UserDefaults) async {
+        let started = Date()
+        let hold = defaults.double(forKey: "ClipcoAutomationHold")
+        var report: [String: Any] = ["readiness_at_launch": model.readiness?.state.rawValue ?? NSNull()]
+        var steps: [[String: Any]] = []
+        func note(_ step: String) {
+            let names = Dictionary(uniqueKeysWithValues: model.projects.map { ($0.id, $0.name) })
+            steps.append([
+                "step": step, "t": (Date().timeIntervalSince(started) * 10).rounded() / 10,
+                "open": model.showingLibrary ? "Footage library" : model.project?.name ?? "nothing",
+                "paused": model.queue?.paused ?? false, "activity": model.activity?.stage ?? NSNull(),
+                "jobs": (model.queue?.jobs ?? []).map {
+                    "\($0.originalFilename): \($0.state.rawValue) → \($0.projectId.flatMap { names[$0] } ?? "library")"
+                },
+                "browser": model.clips.map { "\($0.originalFilename) \($0.status.rawValue)" },
+            ])
+        }
+        var slowestRefresh = 0.0
+        func until(_ seconds: Double, _ condition: () -> Bool) async {
+            let deadline = Date().addingTimeInterval(seconds)
+            while !condition() && Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(500))
+                let asked = Date()
+                await model.refreshQueue()
+                slowestRefresh = max(slowestRefresh, Date().timeIntervalSince(asked))
+            }
+        }
+        let state = ProbeState()
+        let probe = Task { @MainActor in
+            while state.probing {
+                let t = Date()
+                try? await Task.sleep(for: .milliseconds(50))
+                state.worstStall = max(state.worstStall, Date().timeIntervalSince(t) - 0.05)
+            }
+        }
+        note("launch")
+        // 1. Drop on the empty workspace: New Project opens with a suggested name; Create queues the footage.
+        model.drop(Array(sources.dropLast()))
+        report["empty_workspace_drop_opens_new_project"] = model.showNewProject
+        let footage = model.newProjectFootage
+        let suggested = AppModel.suggestedName(for: footage)
+        report["suggested_name"] = suggested
+        if hold > 0 { try? await Task.sleep(for: .seconds(hold)) }  // the sheet, for a window capture
+        model.showNewProject = false
+        guard let created = await model.createProject(name: suggested, context: "") else {
+            report["error"] = model.errorMessage
+            write(report, to: out)
+            NSApp.terminate(nil)
+            return
+        }
+        await model.enqueue(footage, into: created.id)
+        report["notice_after_drop"] = model.importNotice ?? NSNull()
+        note("dropped on empty workspace")
+        // 2. Open another Project while the first one's work is queued: its jobs keep their destination.
+        await model.createProject(name: "Navigation check", context: "")
+        note("opened another Project")
+        // 3. Drop on the Reusable B-roll view: it goes to the library alone.
+        // The sidebar's selection binding can reopen the Project right after a programmatic switch; wait until the
+        // library view holds, as it does after a click.
+        for _ in 0..<10 {
+            await model.openLibrary()
+            try? await Task.sleep(for: .seconds(1))
+            if model.showingLibrary { break }
+        }
+        report["library_open_when_dropped"] = model.showingLibrary
+        model.drop([sources.last!])
+        await until(10) { model.queue?.jobs.contains { $0.originalFilename == sources.last!.lastPathComponent } == true }
+        note("dropped on the library")
+        // 4. Pause once a clip is analysing: it finishes, nothing new starts.
+        await until(120) { model.queue?.active != nil }
+        await model.pauseQueue()
+        note("paused while a clip was active")
+        await until(600) { model.queue?.active == nil && model.queue?.running == false }
+        note("paused: the active clip finished, the runner stopped")
+        // 5. Cancel queued work: removed, footage kept.
+        if let queued = model.queue?.jobs.last(where: { $0.state == .queued }) {
+            await model.cancel([queued])
+            note("cancelled a queued job")
+        }
+        // 6. Resume and keep browsing and searching while the rest is analysed.
+        let resumed = Date()
+        await model.resumeQueue()
+        report["resume_call_seconds"] = Date().timeIntervalSince(resumed)
+        await until(30) { model.queue?.active != nil }
+        note("resumed: the next clip started")
+        if let project = model.projects.first(where: { $0.id == created.id }) { try? await model.open(project) }
+        model.browserMode = .list
+        model.searchText = "person"
+        let asked = Date()
+        await model.search()
+        report["search_while_analysing"] = ["seconds": Date().timeIntervalSince(asked),
+                                            "analysing": model.queue?.active?.originalFilename ?? NSNull(),
+                                            "results": model.searchResults?.results.count ?? 0]
+        model.searchText = ""
+        model.browserMode = .grid
+        note("browsed and searched while analysing")
+        await until(900) { (model.queue?.unfinished ?? 0) == 0 && model.queue?.running == false }
+        try? await model.reload()
+        note("queue finished")
+        state.probing = false
+        _ = await probe.value
+        report["worst_main_thread_stall_ms"] = (state.worstStall * 1000).rounded()
+        report["slowest_queue_refresh_seconds"] = slowestRefresh
+        report["steps"] = steps
+        report["error"] = model.errorMessage ?? NSNull()
+        model.showActivity = true
+        if let window = NSApp.windows.first(where: \.isVisible) {
+            report["window_number"] = window.windowNumber
+            report["window_frame"] = NSStringFromRect(window.frame)
+        }
+        write(report, to: out)
+        if hold > 0 { try? await Task.sleep(for: .seconds(hold * 2)) }  // the Activity popover, for a window capture
+        NSApp.terminate(nil)
+    }
+
     static func runIfRequested(_ model: AppModel) async {
         let defaults = UserDefaults.standard
+        if let list = defaults.string(forKey: "ClipcoAutomationQueue"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
+            let sources = list.split(separator: "|").map { URL(filePath: String($0)) }
+            await queue(model, sources: sources, out: URL(filePath: out), defaults: defaults)
+            return
+        }
         if let name = defaults.string(forKey: "ClipcoAutomationReview"),
            let out = defaults.string(forKey: "ClipcoAutomationOut") {
             await review(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)
