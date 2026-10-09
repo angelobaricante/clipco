@@ -109,8 +109,8 @@ struct WorkerClient: Sendable {
         // GUI apps start with a minimal PATH; FFmpeg and whisper.cpp come from Homebrew.
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin")
         process.environment = environment
-        // Reads and creator actions answer at once even while the queue runner keeps the CPU busy.
-        process.qualityOfService = .userInitiated
+        // Reads and creator actions answer at once; the long-running queue runner yields to them.
+        process.qualityOfService = arguments.first == "run-queue" ? .utility : .userInitiated
         let stdout = Pipe()
         process.standardOutput = stdout
         process.standardError = Self.logHandle() ?? FileHandle.nullDevice

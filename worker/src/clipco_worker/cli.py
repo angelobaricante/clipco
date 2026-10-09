@@ -30,8 +30,22 @@ QUEUE_COMMANDS = ("enqueue", "enqueue-clips", "run-queue", "jobs", "reconcile", 
 def blocker(ollama, whisper_model: Path, vad_model: Path) -> dict | None:
     """None when queued analysis can start; otherwise the readiness that keeps it waiting. An installed model
     that is not loaded is loaded (nothing is downloaded and no other model is substituted)."""
+    if memory_pressure() == "critical":  # temporary pressure: wait rather than start a model-heavy job
+        return {"state": "resource_pressure", "detail": "The Mac is under critical memory pressure.",
+                "guidance": "Close other apps, then resume the queue."}
     state = warm_up(ollama, whisper_model, vad_model)
     return None if state["state"] == "ready" else state
+
+
+def memory_pressure() -> str:
+    """macOS memory pressure level: normal, warning or critical (normal if it cannot be read)."""
+    import subprocess
+    try:
+        level = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], capture_output=True,
+                               text=True, timeout=2).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "normal"
+    return {"2": "warning", "4": "critical"}.get(level, "normal")
 
 
 def emit(event: str, **payload) -> None:

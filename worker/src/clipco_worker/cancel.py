@@ -34,7 +34,9 @@ def check() -> None:
         raise Cancelled()
 
 
-def cancel() -> None:
+def cancel(wait: bool = True) -> None:
+    """Stop the active job's children and inference request. wait=False only signals them (for a signal
+    handler, which must not wait while the interrupted thread is itself waiting on a child)."""
     _cancelled.set()
     with _lock:
         children, connections = list(_children), list(_connections)
@@ -44,6 +46,8 @@ def cancel() -> None:
     for conn in connections:
         with contextlib.suppress(OSError, AttributeError):
             conn.sock.shutdown(socket.SHUT_RDWR)
+    if not wait:
+        return
     for child in children:
         try:
             child.wait(timeout=3)
@@ -51,20 +55,21 @@ def cancel() -> None:
             child.kill()
 
 
-def run(args: list[str], check: bool = True, **kwargs) -> subprocess.CompletedProcess:
-    """subprocess.run that cancel() can stop. A child stopped by cancellation raises Cancelled."""
-    check_cancelled = globals()["check"]
-    check_cancelled()
+def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """subprocess.run(check=True) that cancel() can stop. A child stopped by cancellation raises Cancelled."""
+    check()
     child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kwargs)
     with _lock:
         _children.add(child)
+    if _cancelled.is_set():  # cancelled between the check and registering the child
+        child.terminate()
     try:
         out, err = child.communicate()
     finally:
         with _lock:
             _children.discard(child)
-    check_cancelled()
-    if check and child.returncode:
+    check()
+    if child.returncode:
         raise subprocess.CalledProcessError(child.returncode, args, out, err)
     return subprocess.CompletedProcess(args, child.returncode, out, err)
 

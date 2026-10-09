@@ -360,7 +360,7 @@ struct QueueSummary: View {
         if q.count(.active) + q.count(.queued) > 0 { parts.append("\(done) of \(total - q.count(.cancelled)) done") }
         if q.count(.queued) > 0 { parts.append("\(q.count(.queued)) queued") }
         if q.paused { parts.append("Paused") }
-        if q.count(.waiting) > 0 { parts.append("\(q.count(.waiting)) waiting for setup") }
+        if q.count(.waiting) > 0 { parts.append("\(q.count(.waiting)) waiting") }
         if q.count(.interrupted) > 0 { parts.append("\(q.count(.interrupted)) interrupted") }
         if q.count(.failed) > 0 { parts.append("\(q.count(.failed)) failed") }
         return parts.joined(separator: " · ")
@@ -429,7 +429,7 @@ struct ActivityView: View {
         switch state {
         case .active: "Analyzing"
         case .queued: "Queued"
-        case .waiting: "Waiting for Setup"
+        case .waiting: "Waiting for Setup or Resources"
         case .interrupted: "Interrupted"
         case .failed: "Failed"
         case .completed: "Completed"

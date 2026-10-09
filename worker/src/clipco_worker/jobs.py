@@ -221,7 +221,7 @@ class JobQueue:
         """The runner is being shut down (the app quit): contain the active job's work, leave it interrupted for
         an explicit resume, and start nothing else. Safe to call from a signal handler."""
         self._stopping = True
-        cancel.cancel()
+        cancel.cancel(wait=False)
 
     def _owned_here(self, job_id: str) -> bool:
         row = self.db.execute("SELECT owner FROM jobs WHERE id=?", (job_id,)).fetchone()

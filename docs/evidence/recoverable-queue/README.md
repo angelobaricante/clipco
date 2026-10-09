@@ -84,6 +84,17 @@ Defects found and fixed during these runs:
 2. `FileHandle.bytes` reads queued behind the runner's quiet pipe. Searches waited up to 8.5 s and queue refreshes 19 s. Each process now gets its own readability-handler line reader.
 3. A Resume that arrived while the runner was exiting was dropped. It is now remembered.
 
+After code review:
+
+- **Resource pressure:** the runner's gate also waits when macOS reports critical memory pressure (`kern.memorystatus_vm_pressure_level` = 4). It was not produced on this Mac (the level read "warning" during the review), so the waiting state is covered only by the injected-readiness test.
+- **Cancellation hardening:** a cancel that lands between the check and registering a child now stops it. The SIGTERM handler only signals children, without waiting inside the handler. The runner process runs at utility QoS, so reads stay at user-initiated.
+
+Design choices to confirm with the creator:
+
+- **Cancelled imports show as failed:** a cancelled import of never-analysed footage leaves the clip `failed` with a "cancelled, nothing was saved; retry" explanation. The source status has no `cancelled` value, and `pending` would claim work is still queued.
+- **Project-membership changes leave jobs alone:** removing a clip from a Project, or deleting the Project, does not cancel its queued analysis. The library source remains, so the analysis still serves the library; the job's destination reads "Deleted Project". Only Remove from Library resolves jobs.
+- **Progress display:** per-job progress is the live stage plus segment counts ("Describing segment 1 of 2"), and the aggregate is "n of m done". There is no percentage bar.
+
 Not demonstrated:
 
 - **Hand testing:** nothing was hand-dragged from Finder or clicked by hand. Drops, popover buttons and keyboard focus need the creator's manual check.
