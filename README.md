@@ -49,7 +49,15 @@ ollama pull qwen3.5:4b-q4_K_M
 (cd worker && uv sync)
 ```
 
-Run the app:
+Day to day, one script starts and stops everything (local-only Ollama, worker dependencies, model warm-up, app build and launch):
+
+```sh
+scripts/clipcon start    # then import footage with ⇧⌘I
+scripts/clipcon status   # Ollama, analysis readiness, app, Codex MCP helpers
+scripts/clipcon stop     # quit the app, unload the model, stop the Ollama the script started
+```
+
+Or run the app from Xcode:
 
 ```sh
 cd app && xcodegen generate && open Clipcon.xcodeproj   # then Run (⌘R)
