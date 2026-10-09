@@ -177,6 +177,14 @@ struct WorkerClient: Sendable {
         return s
     }
 
+    func connectAgent(_ client: String) async throws -> McpStatus {
+        guard let status = try await run(["connect-agent", "--client", client]).mcp else {
+            throw WorkerError.noResult
+        }
+        return status
+    }
+
+
     func projects() async throws -> [Project] {
         try await run(["projects"]).projects ?? []
     }

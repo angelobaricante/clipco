@@ -108,6 +108,9 @@ final class AppModel {
     var showSetup = false
     var mcpStatus: McpStatus?
     var isCheckingMcp = false
+    var agentConnection: EditingAgent?
+    var connectingClient: String?
+    var agentConnectionError: String?
     /// The queue's active job as the sidebar and browser show it; nil when nothing is running.
     var activity: ImportActivity?
     /// The recoverable analysis queue: every job with its state, and whether it is paused or running.
@@ -237,13 +240,27 @@ final class AppModel {
 
     /// Runs a real MCP session with the Codex helper; it reads the saved index and loads no model.
     func checkMcp() async {
+        guard !isCheckingMcp, connectingClient == nil else { return }
         isCheckingMcp = true
+        agentConnectionError = nil
         defer { isCheckingMcp = false }
         do {
             mcpStatus = try await worker.mcpStatus()
         } catch {
             mcpStatus = nil
-            errorMessage = "Codex connection check failed: \(error.localizedDescription)"
+            agentConnectionError = "Couldn’t check agent setup: \(error.localizedDescription)"
+        }
+    }
+
+    func connectAgent(_ client: String) async {
+        guard connectingClient == nil, !isCheckingMcp else { return }
+        connectingClient = client
+        agentConnectionError = nil
+        defer { connectingClient = nil }
+        do {
+            mcpStatus = try await worker.connectAgent(client)
+        } catch {
+            agentConnectionError = error.localizedDescription
         }
     }
 

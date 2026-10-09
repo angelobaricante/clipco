@@ -40,6 +40,7 @@ def codex_state(codex: Path | None) -> dict:
         got = run("mcp", "get", "clipco", "--json")
         if got.returncode == 0:
             transport = json.loads(got.stdout).get("transport", {})
+            state["enabled"] = json.loads(got.stdout).get("enabled", True)
             state["registered"] = True
             state["registered_command"] = [transport.get("command") or "", *(transport.get("args") or [])]
     except (OSError, subprocess.SubprocessError, ValueError) as e:  # report it; never fail the whole check
@@ -66,8 +67,10 @@ def connection_status(home: Path) -> dict:
     command = [str(Path(sys.executable).parent / "clipco-mcp"), "--home", str(home)]
     status = {"server_command": command, "add_command": "codex mcp add clipco -- " + shlex.join(command),
               "sdk_version": version("mcp"), "codex": codex_state(find_codex())}
+    from .agent_connections import statuses
+    status["agents"] = statuses(command, status["codex"])
     try:
-        status |= {"ok": True, "error": None, **asyncio.run(session(command))}
+        status |= {"ok": True, "error": None, **asyncio.run(asyncio.wait_for(session(command), timeout=15))}
     except Exception as e:  # the check reports what failed instead of crashing the app's sheet
         status |= {"ok": False, "error": f"{type(e).__name__}: {e}", "tools": [], "project_count": None,
                    "protocol_version": None}
