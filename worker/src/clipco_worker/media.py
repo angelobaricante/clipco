@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+
+from . import cancel
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +29,7 @@ class MediaInfo:
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(args, check=True, capture_output=True, text=True)
+        return cancel.run(args)  # stopped if the creator cancels the job
     except FileNotFoundError as e:
         raise MediaError(f"{args[0]} is not installed") from e
     except subprocess.CalledProcessError as e:
