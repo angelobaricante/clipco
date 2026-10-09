@@ -75,7 +75,18 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
 
     /// Not yet usable context, or suggested corrections/takes the creator may want to choose between.
     var needsReview: Bool {
-        status != .ready || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+        status != .ready || segments.contains { ["mixed", "needs_review"].contains($0.role.effective) }
+            || !unmatchedRoleCorrections.isEmpty || !unmatchedToneCorrections.isEmpty
+            || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+    }
+
+    func containsRole(_ role: String) -> Bool { segments.contains { $0.role.effective == role } }
+
+    var roleLabel: String {
+        let roles = Set(segments.map(\.role.effective))
+        if roles.isEmpty { return "Not analyzed" }
+        if roles.count == 1, let role = roles.first { return SegmentRole.name(role) }
+        return "Mixed"
     }
 
     /// Whisper's language code as a readable name, e.g. "tl" → "Tagalog".
@@ -227,6 +238,34 @@ struct SegmentTone: Decodable, Hashable, Sendable {
     }
 }
 
+enum EditingAgent: String, Identifiable {
+    case codex = "Codex", claude = "Claude"
+    var id: Self { self }
+}
+
+struct AgentRegistration: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var name: String
+    var installed: Bool
+    var configured: Bool
+    var state: String
+    var error: String?
+    var configPath: String?
+    var setupCommand: String?
+    var setupJson: String?
+    var guidance: String
+
+    var title: String {
+        switch state {
+        case "configured": "Configured"
+        case "not_installed": "Not installed"
+        case "conflict": "Needs attention"
+        case "error": "Couldn’t check setup"
+        default: "Not configured"
+        }
+    }
+}
+
 /// Result of the app's Codex connection check: a real MCP session with clipco-mcp.
 struct McpStatus: Decodable, Equatable, Sendable {
     struct Codex: Decodable, Equatable, Sendable {
@@ -249,6 +288,7 @@ struct McpStatus: Decodable, Equatable, Sendable {
     var connectMs: Int?
     var overviewMs: Int?
     var codex: Codex
+    var agents: [AgentRegistration]?
 
     /// Codex has a `clipco` server, but it launches something other than this installation.
     var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }
@@ -260,6 +300,7 @@ struct SearchPage: Decodable, Sendable {
     var totalMatches: Int
     var truncated: Bool
     var results: [SearchHit]
+    var nextOffset: Int?
 }
 
 struct SearchHit: Decodable, Identifiable, Hashable, Sendable {

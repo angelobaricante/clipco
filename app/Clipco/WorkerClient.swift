@@ -177,6 +177,14 @@ struct WorkerClient: Sendable {
         return s
     }
 
+    func connectAgent(_ client: String, disconnect: Bool = false) async throws -> McpStatus {
+        guard let status = try await run([disconnect ? "disconnect-agent" : "connect-agent", "--client", client]).mcp else {
+            throw WorkerError.noResult
+        }
+        return status
+    }
+
+
     func projects() async throws -> [Project] {
         try await run(["projects"]).projects ?? []
     }
@@ -204,10 +212,10 @@ struct WorkerClient: Sendable {
     /// Reads the saved index only, so it answers while another worker process is analysing footage.
     /// The creator's own Project search also matches excluded clips (marked), so they can be found and restored.
     /// Library scope searches reusable B-roll everywhere, as Codex does, preferring projectID's own footage.
-    func search(projectID: String?, query: String, library: Bool = false) async throws -> SearchPage {
+    func search(projectID: String?, query: String, library: Bool = false, offset: Int = 0) async throws -> SearchPage {
         let args = library ? ["search", "--scope", "library", "--query", query] + (projectID.map { ["--project", $0] } ?? [])
                            : ["search", "--project", projectID ?? "", "--query", query, "--include-excluded"]
-        guard let page = try await run(args).search else {
+        guard let page = try await run(args + ["--offset", String(offset)]).search else {
             throw WorkerError.noResult
         }
         return page
@@ -287,8 +295,8 @@ struct WorkerClient: Sendable {
     }
 
     /// Points a clip at its original in a new location. The worker accepts only the same content.
-    func relink(projectID: String, clipID: String, source: URL) async throws {
-        _ = try await run(["relink", "--project", projectID, "--clip", clipID, source.path])
+    func relink(projectID: String?, clipID: String, source: URL) async throws {
+        _ = try await run(["relink"] + Self.destination(projectID) + ["--clip", clipID, source.path])
     }
 
     // The recoverable analysis queue

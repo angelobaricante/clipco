@@ -21,8 +21,8 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
     func includes(_ clip: SourceClip) -> Bool {
         switch self {
         case .all: true
-        case .aRoll: clip.role == "a-roll"
-        case .bRoll: clip.role == "b-roll"
+        case .aRoll: clip.containsRole("a-roll")
+        case .bRoll: clip.containsRole("b-roll")
         case .needsReview: clip.needsReview
         case .excluded: clip.excluded
         case .reusable: clip.reuseAllowed && clip.segments.contains(where: \.isReusableBRoll)
@@ -79,13 +79,19 @@ final class AppModel {
     /// Something is open to browse: a Project, or the library.
     var hasScope: Bool { project != nil || showingLibrary }
     var clips: [SourceClip] = []
-    var filter: FootageFilter = .all
+    var filter: FootageFilter = .all {
+        didSet { if filter != oldValue { reconcileSelection() } }
+    }
     /// Selected Source clips in the browser (Finder-style multiple selection).
     var selection: Set<SourceClip.ID> = []
     /// The clip a ⇧-click range or arrow key starts from: the last one clicked or moved to.
     var selectionAnchor: SourceClip.ID?
-    var showInspector = true
-    var browserMode: BrowserMode = .grid
+    var showInspector = UserDefaults.standard.object(forKey: "showInspector") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showInspector, forKey: "showInspector") }
+    }
+    var browserMode = BrowserMode(rawValue: UserDefaults.standard.string(forKey: "browserMode") ?? "") ?? .grid {
+        didSet { UserDefaults.standard.set(browserMode.rawValue, forKey: "browserMode") }
+    }
     /// The original shown in the system Quick Look panel (Space, or double-click), once its source is verified.
     var quickLookURL: URL?
     let player = PreviewPlayer()
@@ -93,11 +99,18 @@ final class AppModel {
     var playingClipID: SourceClip.ID?
     /// Incremented to move keyboard focus to the toolbar search field (⌘F).
     var searchFocusRequest = 0
+    var browserFocusRequest = 0
+    var followPlayback = true
+    var isLoadingScope = false
+    var isStarting = true
     var inspectorTab: InspectorTab = .context
     var showImport = false
     var showSetup = false
     var mcpStatus: McpStatus?
     var isCheckingMcp = false
+    var agentConnection: EditingAgent?
+    var connectingClient: String?
+    var agentConnectionError: String?
     /// The queue's active job as the sidebar and browser show it; nil when nothing is running.
     var activity: ImportActivity?
     /// The recoverable analysis queue: every job with its state, and whether it is paused or running.
@@ -117,36 +130,92 @@ final class AppModel {
     var clipsToRemove: [SourceClip] = []
     var clipsToRemoveFromLibrary: [SourceClip] = []
     var projectToDelete: Project?
-    var searchText = ""
+    var searchText = "" {
+        didSet {
+            if trimmedQuery.isEmpty {
+                searchGeneration += 1
+                searchResults = nil
+                selectedHit = nil
+                isSearching = false
+                reconcileSelection()
+            }
+        }
+    }
     var searchResults: SearchPage?
     var isSearching = false
     /// The selected search result (a Segment); its Source clip is also the browser selection.
     var selectedHit: SearchHit.ID?
     private var reloadGeneration = 0
+    private var scopeGeneration = 0
+    private var searchGeneration = 0
+    var pendingUpdates: Set<String> = []
+    var updateErrors: [String: String] = [:]
+    var noteDrafts: [String: String] = [:]
 
     var trimmedQuery: String { searchText.trimmingCharacters(in: .whitespaces) }
 
     var visibleClips: [SourceClip] { clips.filter(filter.includes) }
     /// The one clip the inspector shows; nil when none or several are selected.
-    var selectedClip: SourceClip? { selection.count == 1 ? clips.first { selection.contains($0.id) } : nil }
+    var selectedClip: SourceClip? {
+        selection.count == 1 ? selectionClips.first { selection.contains($0.id) } : nil
+    }
+    private var selectionClips: [SourceClip] {
+        trimmedQuery.isEmpty ? visibleClips : clips.filter { clip in
+            searchResults?.results.contains { $0.clipId == clip.id } == true
+        }
+    }
     var selectedClips: [SourceClip] { visibleClips.filter { selection.contains($0.id) } }
 
     func select(_ id: SourceClip.ID?) {
         selection = id.map { [$0] } ?? []
         selectionAnchor = id
     }
+
+    func reconcileSelection() {
+        selection.formIntersection(selectionClips.map(\.id))
+        if !selection.contains(selectionAnchor ?? "") { selectionAnchor = selection.first }
+        if let playingClipID, !selection.contains(playingClipID) { closePlayer() }
+    }
     var canAnalyze: Bool { readiness?.state == .ready || readiness?.state == .cold }
 
     func count(_ filter: FootageFilter) -> Int { clips.filter(filter.includes).count }
 
+    func analysisStatus(_ clip: SourceClip) -> String {
+        if let job = queue?.jobs.last(where: {
+            $0.clipId == clip.id && ["import", "reanalyse"].contains($0.operation)
+                && [.queued, .active, .waiting, .interrupted].contains($0.state)
+        }) {
+            switch job.state {
+            case .queued: return queue?.paused == true ? "Paused" : "Queued"
+            case .active: return activity?.clipID == clip.id ? activity?.stage ?? "Analyzing" : "Analyzing"
+            case .waiting: return "Waiting for setup or resources"
+            case .interrupted: return "Interrupted · resume to continue"
+            default: break
+            }
+        }
+        switch clip.status {
+        case .pending: return "Not analyzed"
+        case .stale: return "Out of date"
+        case .missing: return "Original not found"
+        case .failed: return clip.error?.localizedCaseInsensitiveContains("cancelled") == true ? "Cancelled" : "Failed"
+        case .indexing: return "Analyzing"
+        case .ready: return "Ready"
+        }
+    }
+
     func start() async {
+        defer { isStarting = false }
         async let ready: Void = refreshReadiness()
         do {
             // Work a previous session left unfinished is marked interrupted, to resume only when asked.
             queue = try await worker.queue("reconcile")
             if queue?.running == true { runQueue() }  // follow it; this runner returns at once
             projects = try await worker.projects()
-            if let latest = projects.last { try await open(latest) }
+            let lastScope = UserDefaults.standard.string(forKey: "lastScope")
+            if lastScope == "library" { await openLibrary() }
+            else if let latest = projects.first(where: { $0.id == lastScope }) ?? projects.last {
+                try await open(latest)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -171,13 +240,27 @@ final class AppModel {
 
     /// Runs a real MCP session with the Codex helper; it reads the saved index and loads no model.
     func checkMcp() async {
+        guard !isCheckingMcp, connectingClient == nil else { return }
         isCheckingMcp = true
+        agentConnectionError = nil
         defer { isCheckingMcp = false }
         do {
             mcpStatus = try await worker.mcpStatus()
         } catch {
             mcpStatus = nil
-            errorMessage = "Codex connection check failed: \(error.localizedDescription)"
+            agentConnectionError = "Couldn’t check agent setup: \(error.localizedDescription)"
+        }
+    }
+
+    func connectAgent(_ client: String, disconnect: Bool = false) async {
+        guard connectingClient == nil, !isCheckingMcp else { return }
+        connectingClient = client
+        agentConnectionError = nil
+        defer { connectingClient = nil }
+        do {
+            mcpStatus = try await worker.connectAgent(client, disconnect: disconnect)
+        } catch {
+            agentConnectionError = error.localizedDescription
         }
     }
 
@@ -192,24 +275,39 @@ final class AppModel {
     }
 
     /// Saves the creator's note through the worker; Codex sees it in the next retrieval.
-    func saveNote(_ text: String, for clipID: SourceClip.ID) async {
+    @discardableResult
+    func saveNote(_ text: String, for clipID: SourceClip.ID, projectID: String? = nil) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let project, let clip = clips.first(where: { $0.id == clipID }),
-              trimmed != (clip.note?.text ?? "") else { return }
+        guard let destination = projectID ?? scopeProjectID else { return false }
+        let key = "note:\(destination):\(clipID)"
+        guard pendingUpdates.insert(key).inserted else { return false }
+        defer { pendingUpdates.remove(key) }
+        updateErrors[key] = nil
+        noteDrafts[key] = text
         do {
-            try await worker.setNote(projectID: project.id, clipID: clipID, text: trimmed)
-            try await reload()
-            if !trimmedQuery.isEmpty { await search() }
+            try await worker.setNote(projectID: destination, clipID: clipID, text: trimmed)
+            if noteDrafts[key] == text { noteDrafts[key] = nil }
+            if scopeProjectID == destination {
+                try await reload()
+                if !trimmedQuery.isEmpty { await search() }
+            }
+            return true
         } catch {
-            errorMessage = "Could not save the note for \(clip.originalFilename): \(error.localizedDescription)"
+            updateErrors[key] = "Could not save. \(error.localizedDescription)"
+            return false
         }
     }
 
     /// Excludes clips from (or restores them to) new default search results. Reversible; nothing is deleted.
-    func setExcluded(_ targets: [SourceClip], _ excluded: Bool) async {
-        guard let project, !targets.isEmpty else { return }
+    func setExcluded(_ targets: [SourceClip], _ excluded: Bool, projectID: String? = nil) async {
+        guard let destination = projectID ?? scopeProjectID, !targets.isEmpty else { return }
+        let keys = targets.map { "exclude:\(destination):\($0.id)" }
+        guard keys.allSatisfy({ !pendingUpdates.contains($0) }) else { return }
+        pendingUpdates.formUnion(keys)
+        defer { pendingUpdates.subtract(keys) }
         do {
-            try await worker.setExcluded(projectID: project.id, clipIDs: targets.map(\.id), excluded: excluded)
+            try await worker.setExcluded(projectID: destination, clipIDs: targets.map(\.id), excluded: excluded)
+            guard scopeProjectID == destination else { return }
             try await reload()
             // Under the Excluded filter, an included clip leaves the browser, so it leaves the selection too.
             let shown = Set(visibleClips.map(\.id))
@@ -225,6 +323,9 @@ final class AppModel {
 
     /// Allows or prevents reuse of a clip's footage outside its own Projects (source-wide, reversible).
     func setReuse(_ clip: SourceClip, _ allowed: Bool) async {
+        let key = "reuse:\(clip.id)"
+        guard pendingUpdates.insert(key).inserted else { return }
+        defer { pendingUpdates.remove(key) }
         do {
             try await worker.setReuse(clipIDs: [clip.id], allowed: allowed)
             try await reload()
@@ -245,6 +346,9 @@ final class AppModel {
 
     /// Records the creator's emotional tones for one Segment (nil returns it to the suggestions).
     func setTones(_ tones: [String]?, for segment: Segment) async {
+        let key = "tone:\(segment.id)"
+        guard pendingUpdates.insert(key).inserted else { return }
+        defer { pendingUpdates.remove(key) }
         do {
             try await worker.setSegmentTones(segmentID: segment.id, tones: tones)
             try await reload()
@@ -278,6 +382,9 @@ final class AppModel {
 
     /// Records the creator's role for one Segment (nil returns it to the suggested role).
     func setRole(_ role: String?, for segment: Segment) async {
+        let key = "role:\(segment.id)"
+        guard pendingUpdates.insert(key).inserted else { return }
+        defer { pendingUpdates.remove(key) }
         do {
             try await worker.setSegmentRole(segmentID: segment.id, role: role)
             try await reload()
@@ -287,7 +394,7 @@ final class AppModel {
     }
 
     /// The clips menu commands act on: the browser selection.
-    var commandTargets: [SourceClip] { clips.filter { selection.contains($0.id) } }
+    var commandTargets: [SourceClip] { selectionClips.filter { selection.contains($0.id) } }
 
     /// Opens the selected clip's original in Quick Look after checking it is the file that was indexed.
     func quickLook() async {
@@ -312,13 +419,15 @@ final class AppModel {
     /// Space in the browser: plays the one selected clip. Returns false when there is nothing to play.
     func playSelectedClip() -> Bool {
         guard let id = selectedClip?.id else { return false }
-        Task { await openPlayer(id) }
+        let start = searchResults?.results.first { $0.id == selectedHit && $0.clipId == id }?.start
+        Task { await openPlayer(id, at: start) }
         return true
     }
 
     func closePlayer() {
         player.pause()
         playingClipID = nil
+        browserFocusRequest += 1
     }
 
     /// The transcript line spoken at the player's position, while the player shows this clip.
@@ -329,6 +438,10 @@ final class AppModel {
 
     func open(_ project: Project) async throws {
         guard project.id != self.project?.id || showingLibrary else { return }
+        scopeGeneration += 1
+        let generation = scopeGeneration
+        isLoadingScope = true
+        defer { if scopeGeneration == generation { isLoadingScope = false } }
         closePlayer()
         showingLibrary = false
         if filter == .reusable { filter = .all }
@@ -338,14 +451,21 @@ final class AppModel {
         selectedHit = nil
         searchText = ""
         searchResults = nil
+        isSearching = false
         try await reload()
+        guard generation == scopeGeneration else { return }
         select(visibleClips.first?.id)
+        UserDefaults.standard.set(project.id, forKey: "lastScope")
         await checkSources()
     }
 
     /// Shows reusable B-roll from every Project and standalone library footage.
     func openLibrary() async {
         guard !showingLibrary else { return }
+        scopeGeneration += 1
+        let generation = scopeGeneration
+        isLoadingScope = true
+        defer { if scopeGeneration == generation { isLoadingScope = false } }
         closePlayer()
         showingLibrary = true
         filter = .reusable
@@ -354,9 +474,12 @@ final class AppModel {
         selectedHit = nil
         searchText = ""
         searchResults = nil
+        isSearching = false
         do {
             try await reload()
+            guard generation == scopeGeneration else { return }
             select(visibleClips.first?.id)
+            UserDefaults.standard.set("library", forKey: "lastScope")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -404,11 +527,12 @@ final class AppModel {
 
     /// Points a missing clip at the same original in its new place; a different file is refused by the worker.
     func locate(_ clip: SourceClip, at url: URL) async {
-        guard let project else { return }
+        guard hasScope else { return }
+        let destination = scopeProjectID
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         do {
-            try await worker.relink(projectID: project.id, clipID: clip.id, source: url)
+            try await worker.relink(projectID: destination, clipID: clip.id, source: url)
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
         } catch {
@@ -482,27 +606,45 @@ final class AppModel {
         clips = snapshot.clips
         // Drop clips that no longer exist; never invent a selection the creator cleared.
         let hadSelection = !selection.isEmpty
-        selection.formIntersection(clips.map(\.id))
+        reconcileSelection()
         if hadSelection && selection.isEmpty { select(visibleClips.first?.id) }
     }
 
     /// Searches the saved index in a separate worker process: no model starts, and it answers while
     /// another clip is still being analysed.
-    func search() async {
+    func search(loadMore: Bool = false) async {
         let query = trimmedQuery
+        searchGeneration += 1
+        let generation = searchGeneration
+        let scope = scopeGeneration
         guard hasScope, !query.isEmpty else {
             searchResults = nil
+            isSearching = false
+            selectedHit = nil
+            reconcileSelection()
             return
         }
+        let previous = loadMore ? searchResults : nil
+        let offset = previous?.nextOffset ?? 0
         isSearching = true
-        defer { if query == trimmedQuery { isSearching = false } }
+        defer { if generation == searchGeneration { isSearching = false } }
         do {
-            let page = try await worker.search(projectID: project?.id, query: query, library: showingLibrary)
-            if page.query == trimmedQuery { searchResults = page }
+            var page = try await worker.search(projectID: showingLibrary ? nil : project?.id,
+                                              query: query, library: showingLibrary, offset: offset)
+            guard generation == searchGeneration, scope == scopeGeneration, query == trimmedQuery else { return }
+            if let previous, previous.query == page.query {
+                let seen = Set(previous.results.map(\.id))
+                page.results = previous.results + page.results.filter { !seen.contains($0.id) }
+            }
+            searchResults = page
+            if !page.results.contains(where: { $0.id == selectedHit }) { selectedHit = nil }
+            reconcileSelection()
         } catch is CancellationError {
             // Superseded by newer typing; its worker process was stopped.
         } catch {
-            errorMessage = "Search failed: \(error.localizedDescription)"
+            if generation == searchGeneration, scope == scopeGeneration {
+                errorMessage = "Search failed: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -549,8 +691,9 @@ final class AppModel {
 
     /// Registers the chosen videos and folders in the destination now and queues their analysis. The
     /// destination is fixed here, so opening another Project later cannot move this work.
-    func enqueue(_ urls: [URL], into projectID: String?) async {
-        guard !urls.isEmpty else { return }
+    @discardableResult
+    func enqueue(_ urls: [URL], into projectID: String?) async -> Bool {
+        guard !urls.isEmpty else { return false }
         let accessed = urls.filter { $0.startAccessingSecurityScopedResource() }
         defer { accessed.forEach { $0.stopAccessingSecurityScopedResource() } }
         do {
@@ -568,8 +711,10 @@ final class AppModel {
             importNotice = parts.joined(separator: " · ")
             if projectID == scopeProjectID { try await reload() }
             runQueue()
+            return true
         } catch {
             errorMessage = "Could not import: \(error.localizedDescription)"
+            return false
         }
     }
 

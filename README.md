@@ -93,7 +93,7 @@ Speech language is detected per clip (`CLIPCO_SPEECH_LANGUAGE=auto`); force it w
 
 The worker CLI is also usable directly: `uv run clipco-worker readiness|warmup|projects|create-project|import|snapshot`.
 
-## Connect Codex (task #3: MCP retrieval)
+## Connect an AI agent
 
 `clipco-mcp` is a read-only stdio MCP server over the saved index. It loads no model and does not need the app to be running. Its five tools are `get_project_overview`, `search_footage`, `get_segment_context`, `get_segment_preview`, and `resolve_media`. Each tool takes an explicit `project_id` or `segment_id`.
 
@@ -103,11 +103,13 @@ The sidebar filters All Footage, A-roll, B-roll, Needs Review (not ready yet, or
 
 In the inspector's Context tab, a **creator note** is saved through the worker when you leave the field. Codex receives it in `get_segment_context` as `creator_notes`, kept apart from transcript, observations, and interpretation, and `search_footage` matches it as `creator_note` evidence. **Include in retrieval** (or Clip ▸ Exclude from Retrieval, ⇧⌘E) is reversible. Excluded clips leave new default `search_footage` results and relationship suggestions; `include_excluded: true` still finds them. Context Codex already retrieved is not revoked: fetching an excluded Segment by ID returns it with `excluded: true`. From the command line: `clipco-worker set-note --clip ID --text "…"` and `clipco-worker set-excluded --project ID --excluded yes|no CLIP_ID…`.
 
-Open the setup sheet by clicking the readiness badge in the sidebar. The **Codex connection (MCP)** section runs a live MCP session against the index and shows the exact registration command. On this Mac the command is:
+The sidebar’s **AI Agents** section has dedicated **Codex** and **Claude** actions. Claude setup supports both **Claude Code** and **Claude Desktop**. Choose your client, then click **Connect**. The app checks the local footage tools and saves the client registration; it starts no analysis and loads no model.
 
-```sh
-codex mcp add clipco -- ~/clipco/worker/.venv/bin/clipco-mcp --home "$HOME/Library/Application Support/Clipco"
-```
+**Configured** means the client’s saved registration points to this Clipco helper and index. It does not mean an active agent session has loaded the tools. Start a new Codex/Claude Code session after connecting, or quit and reopen Claude Desktop. Ask the agent to list your Clipco Projects to verify tools in your actual session. **Check Setup** independently checks registration and runs a real local MCP handshake.
+
+Codex registration uses the installed CLI’s `mcp add`. Claude Code gets a user-scoped `clipco` entry in `~/.claude.json`; Claude Desktop gets it in `~/Library/Application Support/Claude/claude_desktop_config.json`. Claude registration preserves other settings, creates a private backup before changing an existing file, and publishes the merged JSON atomically. Configured clients show **Disconnect**, which removes only the saved Clipco registration. A conflicting or disabled registration shows **Disconnect Existing Connection** with a confirmation; remove it, then click Connect to use this workspace. Invalid JSON still needs repair in the client. Start a new agent session (or reopen Claude Desktop) after disconnecting; already-running sessions and previously retrieved context are not revoked. Manual commands/configuration are available in a disclosure.
+
+The client formats follow [Claude Code’s MCP documentation](https://code.claude.com/docs/en/mcp) and the [local MCP/Claude Desktop guide](https://modelcontextprotocol.io/docs/develop/connect-local-servers). Codex’s registration syntax is checked against the installed CLI’s help. Connecting makes saved footage context available to the agent; what the agent retrieves may be sent to its provider. Clipco’s own analysis remains local.
 
 The tools are annotated read-only, so Codex runs them without approval prompts. `resolve_media` returns a path only when the original file is still present and unchanged (same size and modification time). A returned path is only a locator: Codex reads the file with its own normal access to this Mac.
 

@@ -17,6 +17,74 @@ final class ProbeState {
 ///     [-ClipcoAutomationSearch "query"]   (the import path may also be a folder)
 @MainActor
 enum AutomationRun {
+    /// UI regression verification through real worker entry points, restricted to a disposable index.
+    static func polish(_ model: AppModel, out: URL) async {
+        guard let home = ProcessInfo.processInfo.environment["CLIPCO_HOME"],
+              home.hasPrefix("/private/tmp/") else { return }
+        var checks: [String: Bool] = [:]
+        do {
+            guard let project = model.projects.last else { throw WorkerError.noResult }
+            try await model.open(project)
+            model.filter = .all
+            guard let clip = model.clips.first(where: { !$0.segments.isEmpty && !$0.excluded }),
+                  let segment = clip.segments.first else { throw WorkerError.noResult }
+
+            // Filters must follow corrected Segment roles, not the legacy whole-clip classification.
+            await model.setRole("needs_review", for: segment)
+            model.filter = .needsReview
+            checks["unresolved_role_is_reviewable"] = model.visibleClips.contains { $0.id == clip.id }
+            await model.setRole("b-roll", for: segment)
+            model.filter = .bRoll
+            checks["corrected_segment_in_broll_filter"] = model.visibleClips.contains { $0.id == clip.id }
+            model.select(clip.id)
+            model.filter = .excluded
+            checks["hidden_selection_cleared"] = model.selectedClip == nil && model.commandTargets.isEmpty
+            model.filter = .all
+
+            // Note destination must remain the membership captured before navigation.
+            let other = try await model.worker.createProject(name: "UI verification destination", context: "")
+            try await model.worker.addToProject(projectID: other.id, clipIDs: [clip.id])
+            model.projects.append(other)
+            try await model.open(other)
+            let saved = await model.saveNote("UI verification: captured Project", for: clip.id, projectID: project.id)
+            let old = try await model.worker.snapshot(projectID: project.id)
+            let new = try await model.worker.snapshot(projectID: other.id)
+            checks["note_saved_to_captured_project"] = saved
+                && old.clips.first(where: { $0.id == clip.id })?.note?.text == "UI verification: captured Project"
+                && new.clips.first(where: { $0.id == clip.id })?.note == nil
+
+            // Pagination and nonzero playback use the same actions exposed in the browser.
+            await model.openLibrary()
+            model.searchText = "camera"
+            await model.search()
+            let firstIDs = Set(model.searchResults?.results.map(\.id) ?? [])
+            if model.searchResults?.nextOffset != nil {
+                await model.search(loadMore: true)
+                let all = model.searchResults?.results ?? []
+                checks["search_continuation_no_duplicates"] = all.count > firstIDs.count
+                    && Set(all.map(\.id)).count == all.count
+            }
+            guard let hit = model.searchResults?.results.first(where: { $0.start > 0 }) else {
+                throw WorkerError.noResult
+            }
+            model.selectedHit = hit.id
+            model.select(hit.clipId)
+            checks["search_play_action_available"] = model.playSelectedClip()
+            try? await Task.sleep(for: .seconds(1))
+            model.player.pause()
+            let position = model.player.currentTime ?? -1
+            checks["playback_starts_at_matching_segment"] = position >= hit.start && position < hit.start + 3
+            model.closePlayer()
+            model.searchText = ""
+            checks["clear_search_resets_loading"] = !model.isSearching && model.searchResults == nil
+            checks["no_errors"] = model.errorMessage == nil
+            write(["checks": checks, "passed": !checks.isEmpty && checks.values.allSatisfy { $0 },
+                   "playback_start": hit.start, "observed_position": position], to: out)
+        } catch {
+            write(["checks": checks, "passed": false, "error": error.localizedDescription], to: out)
+        }
+        NSApp.terminate(nil)
+    }
     /// Review workflow on a real Project: selection across inspector/view changes, filters, verified playback
     /// access, then (optionally) a note and exclusion through the same model calls the inspector uses.
     ///
@@ -334,6 +402,11 @@ enum AutomationRun {
 
     static func runIfRequested(_ model: AppModel) async {
         let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "ClipcoAutomationPolish"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
+            await polish(model, out: URL(filePath: out))
+            return
+        }
         if let list = defaults.string(forKey: "ClipcoAutomationQueue"),
            let out = defaults.string(forKey: "ClipcoAutomationOut") {
             let sources = list.split(separator: "|").map { URL(filePath: String($0)) }
