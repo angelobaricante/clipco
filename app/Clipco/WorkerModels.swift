@@ -75,7 +75,18 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
 
     /// Not yet usable context, or suggested corrections/takes the creator may want to choose between.
     var needsReview: Bool {
-        status != .ready || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+        status != .ready || segments.contains { ["mixed", "needs_review"].contains($0.role.effective) }
+            || !unmatchedRoleCorrections.isEmpty || !unmatchedToneCorrections.isEmpty
+            || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+    }
+
+    func containsRole(_ role: String) -> Bool { segments.contains { $0.role.effective == role } }
+
+    var roleLabel: String {
+        let roles = Set(segments.map(\.role.effective))
+        if roles.isEmpty { return "Not analyzed" }
+        if roles.count == 1, let role = roles.first { return SegmentRole.name(role) }
+        return "Mixed"
     }
 
     /// Whisper's language code as a readable name, e.g. "tl" → "Tagalog".
@@ -260,6 +271,7 @@ struct SearchPage: Decodable, Sendable {
     var totalMatches: Int
     var truncated: Bool
     var results: [SearchHit]
+    var nextOffset: Int?
 }
 
 struct SearchHit: Decodable, Identifiable, Hashable, Sendable {

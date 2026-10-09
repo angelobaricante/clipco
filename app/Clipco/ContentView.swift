@@ -152,7 +152,7 @@ struct ProjectDialogs: ViewModifier {
                                                                          encoding: .utf8)
             }
             #endif
-            .alert("Something went wrong", isPresented: Binding(
+            .alert("Couldn’t Complete the Action", isPresented: Binding(
                 get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })
             ) {
                 Button("OK", role: .cancel) {}
@@ -197,6 +197,7 @@ struct SidebarView: View {
                 }
             })
         ) {
+            if !model.showingLibrary {
             Section(model.project?.name ?? "No Project") {
                 ForEach([FootageFilter.all, .aRoll, .bRoll]) { filter in
                     FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
@@ -206,6 +207,7 @@ struct SidebarView: View {
                 ForEach([FootageFilter.needsReview, .excluded]) { filter in
                     FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
                 }
+            }
             }
             Section("Footage Library") {
                 Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
@@ -237,6 +239,8 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 8) {
                 QueueSummary()
                 ReadinessBadge()
+                Button("Setup & Connect Codex…", systemImage: "gearshape") { model.showSetup = true }
+                    .buttonStyle(.borderless).font(.caption)
             }
             .padding(12)
         }
@@ -405,7 +409,7 @@ struct ActivityView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analysis Queue").font(.headline)
-                Text(q?.paused == true ? "Paused · the active clip finishes, nothing new starts"
+                Text(q?.paused == true ? (q?.active != nil ? "Pausing after the current clip" : "Paused")
                      : "Sequential · one clip at a time")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -503,6 +507,9 @@ struct NewProjectSheet: View {
     @State private var context = ""
     @State private var sources: [URL]
     @State private var choosing = false
+    @State private var creating = false
+    @State private var createdProjectID: String?
+    @FocusState private var nameFocused: Bool
 
     init(footage: [URL]) {
         _sources = State(initialValue: footage)
@@ -515,10 +522,12 @@ struct NewProjectSheet: View {
         Form {
             Section("Project") {
                 TextField("Name", text: $name, prompt: Text("Water filter tutorial"))
+                    .focused($nameFocused)
                 TextField("Context", text: $context, prompt: Text("Optional: what is the intended video about?"),
                           axis: .vertical)
                     .lineLimit(2...4)
             }
+            .disabled(createdProjectID != nil)
             Section("Footage (optional)") {
                 LabeledContent(sources.isEmpty ? "None yet" : sources.count == 1 ? sources[0].lastPathComponent
                                                                                   : "\(sources.count) items") {
@@ -540,21 +549,34 @@ struct NewProjectSheet: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
+        .disabled(creating)
+        .onAppear { nameFocused = true }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie], allowsMultipleSelection: true) {
             if case .success(let urls) = $0 { sources = urls }
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(creating) }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Create") {
+                Button(creating ? "Creating…" : createdProjectID == nil ? "Create" : "Retry Adding Footage") {
                     let (name, context, footage) = (trimmedName, context, sources)
-                    dismiss()
+                    creating = true
                     Task {
-                        guard let created = await model.createProject(name: name, context: context) else { return }
-                        if !footage.isEmpty { await model.enqueue(footage, into: created.id) }
+                        let destination: String
+                        if let createdProjectID { destination = createdProjectID }
+                        else {
+                        guard let created = await model.createProject(name: name, context: context) else {
+                            creating = false
+                            return
+                        }
+                        destination = created.id
+                        createdProjectID = created.id
+                        }
+                        let added = footage.isEmpty ? true : await model.enqueue(footage, into: destination)
+                        if added { dismiss() }
+                        creating = false
                     }
                 }
-                .disabled(trimmedName.isEmpty)
+                .disabled(trimmedName.isEmpty || creating)
             }
         }
     }

@@ -31,6 +31,10 @@ struct ClipcoApp: App {
                 Button("Find in Footage Context") { model.searchFocusRequest += 1 }
                     .keyboardShortcut("f", modifiers: .command)
             }
+            CommandGroup(replacing: .appSettings) {
+                Button("Clipco Setup…") { model.showSetup = true }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(after: .sidebar) {
                 Picker("View", selection: $model.browserMode) {
                     Text("as Grid").tag(BrowserMode.grid).keyboardShortcut("1", modifiers: .command)
@@ -56,13 +60,13 @@ struct ClipcoApp: App {
                     Task { await model.setExcluded(targets, !allExcluded) }
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(targets.isEmpty)
+                .disabled(targets.isEmpty || model.showingLibrary)
                 Divider()
                 Button("Re-analyse") { Task { await model.retry(targets) } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(!model.canRetry(targets))
                 Button("Check Original Files") { Task { await model.checkSources() } }
-                    .disabled(model.project == nil || model.activity != nil || model.isCheckingSources)
+                    .disabled(!model.hasScope || model.activity != nil || model.isCheckingSources)
             }
         }
     }

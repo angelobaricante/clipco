@@ -1,14 +1,20 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum ImportDestination: Hashable {
+    case library, project(String), newProject
+}
+
 struct ImportSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var addToCurrent = true
+    @State private var destination: ImportDestination = .library
     @State private var name = ""
     @State private var context = ""
     @State private var sources: [URL] = []
     @State private var choosing = false
+    @State private var submitting = false
+    @State private var createdProjectID: String?
 
     private var chosenSummary: String {
         switch sources.count {
@@ -18,66 +24,92 @@ struct ImportSheet: View {
         }
     }
 
-    private var creatingProject: Bool { model.project == nil || !addToCurrent }
-
     var body: some View {
         Form {
-            Section("Project") {
-                if let project = model.project {
-                    Picker("Destination", selection: $addToCurrent) {
-                        Text(project.name).tag(true)
-                        Text("New Project").tag(false)
+            Section("Destination") {
+                Picker("Add footage to", selection: $destination) {
+                    Text("Footage Library").tag(ImportDestination.library)
+                    ForEach(model.projects) { project in
+                        Text(project.name).tag(ImportDestination.project(project.id))
                     }
+                    Divider()
+                    Text("New Project…").tag(ImportDestination.newProject)
                 }
-                if creatingProject {
+                if destination == .newProject {
                     TextField("Name", text: $name, prompt: Text("Water filter tutorial"))
-                    TextField("Context", text: $context, prompt: Text("What is the intended video about?"),
-                              axis: .vertical)
-                        .lineLimit(2...4)
-                } else if let project = model.project, !project.context.isEmpty {
-                    LabeledContent("Context", value: project.context)
+                    TextField("Context", text: $context, prompt: Text("Optional: what is the intended video about?"),
+                              axis: .vertical).lineLimit(2...4)
                 }
             }
+            .disabled(createdProjectID != nil)
             Section("Footage") {
-                LabeledContent(chosenSummary) {
-                    Button("Choose…") { choosing = true }
-                }
+                LabeledContent(chosenSummary) { Button("Choose…") { choosing = true } }
                 if sources.count > 1 {
                     ForEach(sources, id: \.self) { url in
-                        Label(url.lastPathComponent, systemImage: url.hasDirectoryPath ? "folder" : "film")
+                        Label(url.lastPathComponent, systemImage: AppModel.isFolder(url) ? "folder" : "film")
                             .font(.callout).lineLimit(1).truncationMode(.middle)
                     }
                 }
-                Text("Choose clips and folders — ⌘-click or ⇧-click to choose several. Every video inside a chosen "
-                     + "folder is imported. Originals are only read. Analysis runs locally with whisper.cpp and Ollama.")
+                Text("Add videos or folders. Originals stay where they are. Analysis runs locally, one clip at a time.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let r = model.readiness, !model.canAnalyze {
                 Section {
-                    Label("Footage is added now and waits to be analysed: \(r.detail)",
-                          systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(r.guidance).font(.caption).textSelection(.enabled)
+                    Label("Footage can be added now. Analysis waits for setup.",
+                          systemImage: "clock").foregroundStyle(.secondary)
+                    DisclosureGroup("Setup details") {
+                        Text(r.detail).font(.caption)
+                        Text(r.guidance).font(.caption).textSelection(.enabled)
+                    }
                 }
             }
+            if submitting { ProgressView("Adding footage…").controlSize(.small) }
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { sources = urls }
+        .disabled(submitting)
+        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie], allowsMultipleSelection: true) {
+            switch $0 {
+            case .success(let urls): sources = urls
+            case .failure(let error): model.errorMessage = error.localizedDescription
+            }
         }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Add to Queue") {
-                    guard !sources.isEmpty else { return }
-                    let projectName = creatingProject ? name.trimmingCharacters(in: .whitespaces) : nil
-                    let context = context
-                    dismiss()
-                    let chosen = sources
-                    Task { await model.importFootage(chosen, newProjectName: projectName, context: context) }
-                }
-                .disabled(sources.isEmpty || (creatingProject && name.trimmingCharacters(in: .whitespaces).isEmpty))
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }.disabled(submitting)
             }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(createdProjectID == nil ? "Add Footage" : "Retry Adding Footage") {
+                    let chosen = sources, target = destination
+                    let projectName = name.trimmingCharacters(in: .whitespacesAndNewlines), projectContext = context
+                    submitting = true
+                    Task {
+                        let projectID: String?
+                        switch target {
+                        case .library: projectID = nil
+                        case .project(let id): projectID = id
+                        case .newProject:
+                            if let createdProjectID { projectID = createdProjectID }
+                            else {
+                            guard let created = await model.createProject(name: projectName, context: projectContext) else {
+                                submitting = false
+                                return
+                            }
+                            projectID = created.id
+                            createdProjectID = created.id
+                            }
+                        }
+                        if await model.enqueue(chosen, into: projectID) { dismiss() }
+                        submitting = false
+                    }
+                }
+                .disabled(submitting || sources.isEmpty || (destination == .newProject
+                    && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            }
+        }
+        .onAppear {
+            destination = model.scopeProjectID.map(ImportDestination.project) ?? .library
+            if !model.hasScope { destination = .newProject }
         }
         .task { await model.refreshReadiness() }
     }
