@@ -315,22 +315,14 @@ class Index:
         if not (0 <= start < end <= duration + 1e-6):
             raise RetrievalError(f"range {start}–{end}s is invalid for {seg['original_filename']}; "
                                  f"need 0 <= start < end <= duration ({duration}s)")
+        status = live_status(seg)  # the same answer overview and search give for this clip
         out = {**self._reference(seg), "start": start, "end": min(end, duration), "duration": duration,
-               "index_status": live_status(seg), "revision": seg["revision"]}
-        if seg["status"] != "ready":
-            return {**out, "available": False, "state": seg["status"],
-                    "detail": f"Clipcon marks this clip {seg['status']}. {STATUS_NOTES[seg['status']]} "
+               "index_status": status, "revision": seg["revision"]}
+        if status != "ready":
+            return {**out, "available": False, "state": status,
+                    "detail": f"Clipcon marks this clip {status}. {STATUS_NOTES[status]} "
                               "Ask the creator to resolve it in Clipcon."}
         path = Path(seg["source_path"])
-        try:
-            stat = path.stat()
-        except OSError:
-            return {**out, "available": False, "state": "missing",
-                    "detail": "The original file is not at its indexed location. Ask the creator to restore it."}
-        if stat.st_size != seg["size_bytes"] or abs(stat.st_mtime - seg["mtime"]) > 1e-3:
-            return {**out, "available": False, "state": "changed",
-                    "detail": "The file changed since it was indexed; its saved context may be stale. "
-                              "Ask the creator to re-analyse it in Clipcon."}
         return {**out, "available": True, "state": "available", "path": str(path), "file_url": path.as_uri(),
                 "note": "A locator only: it grants no new filesystem permission. Read the file with your own "
                         "tools under their normal access to this Mac."}

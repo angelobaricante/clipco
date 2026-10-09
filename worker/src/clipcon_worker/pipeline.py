@@ -270,15 +270,15 @@ class Worker:
         other = self.store.clip_by_path(project_id, str(source))
         if other and other["id"] != clip_id:
             raise ValueError(f"{source.name} is already clip {other['id']} in this Project")
-        if clip["fingerprint"] and fingerprint(source) != clip["fingerprint"]:
+        if not clip["fingerprint"]:  # never analysed: nothing proves the file is this clip's footage
+            raise ValueError(f"{clip['original_filename']} was never analysed, so {source.name} cannot be confirmed "
+                             "as the same footage. Import it as a new clip instead.")
+        if fingerprint(source) != clip["fingerprint"]:
             raise ValueError(f"{source.name} is not the same footage as {clip['original_filename']} (its content "
                              "differs). Import it as a new clip instead.")
         stat = source.stat()
         self.store.set_source(clip_id, str(source), source.name, stat.st_size, stat.st_mtime)
-        if clip["revision"] == 0:  # never analysed: nothing to verify, it is ready for a retry
-            self.store.set_status(clip_id, "pending")
-        else:
-            self.store.set_status(clip_id, *self._verify(self.store.clip(clip_id), lambda stage, detail: None))
+        self.store.set_status(clip_id, *self._verify(self.store.clip(clip_id), lambda stage, detail: None))
         return self._outcome([clip_id])
 
     def _verify(self, clip: dict, report: Progress) -> tuple[str, str | None]:

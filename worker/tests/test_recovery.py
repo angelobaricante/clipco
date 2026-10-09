@@ -48,6 +48,14 @@ def test_a_failed_clip_is_retried_in_place_without_disturbing_the_rest(home, tmp
     assert clips_by_name(worker, pid)["broll-2-drip.mp4"]["status"] == "failed"
     vision.on_describe = lambda request: None
 
+    # Never analysed, so nothing proves another file is the same footage: its note and exclusion stay put.
+    try:
+        worker.relink(pid, drip["id"], shutil.copy(folder / "broll-1-pour.mp4", tmp_path / "drip-take-2.mp4"))
+        raise AssertionError("relinked a never-analysed clip to other footage")
+    except ValueError as e:
+        assert "Import it as a new clip" in str(e)
+    assert clips_by_name(worker, pid)["broll-2-drip.mp4"]["source_path"] == drip["source_path"]
+
     vision.fail.clear()
     stages = []
     outcome = worker.retry(pid, [drip["id"]], progress=lambda stage, detail: stages.append((stage, detail["clip_id"])))
