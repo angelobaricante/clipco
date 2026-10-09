@@ -1,0 +1,94 @@
+import hashlib
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from clipcon_worker.speech import TranscriptSpan
+
+
+def make_clip(path: Path, seconds: float = 12.0) -> Path:
+    """Render a small real video file (test pattern + tone) with FFmpeg."""
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y",
+            "-f", "lavfi", "-i", f"testsrc2=size=320x240:rate=24:duration={seconds}",
+            "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class RecordedSpeech:
+    """Replays whisper-shaped spans; counts calls to observe cache reuse."""
+
+    identity = {"engine": "recorded-speech", "model": "fixture"}
+
+    def __init__(self, spans):
+        self.spans = spans
+        self.calls = 0
+
+    def transcribe(self, wav_path: Path):
+        self.calls += 1
+        assert wav_path.exists()
+        return list(self.spans)
+
+
+class RecordedVision:
+    """Replays model-shaped JSON that cites the evidence IDs it was given."""
+
+    identity = {"engine": "recorded-vision", "model": "fixture"}
+
+    def __init__(self, invent_ids: bool = False, fail: bool = False):
+        self.invent_ids = invent_ids
+        self.fail = fail
+        self.calls = 0
+        self.requests = []
+
+    def describe(self, request):
+        self.calls += 1
+        self.requests.append(request)
+        if self.fail:
+            from clipcon_worker.vision import InferenceError
+            raise InferenceError("recorded failure")
+        frame_ids = [f.id for f in request.frames]
+        transcript_ids = [t.id for t in request.transcript]
+        observations = [
+            {"frame_id": fid, "text": f"Colour bars test pattern in {fid}."} for fid in frame_ids
+        ]
+        cited = transcript_ids + frame_ids
+        if self.invent_ids:
+            observations.append({"frame_id": "f999", "text": "A frame that was never sampled."})
+            cited = cited + ["t999"]
+        return {
+            "label": "Test pattern explanation",
+            "observations": observations,
+            "interpretation": "The speaker introduces the test pattern.",
+            "evidence_ids": cited,
+        }
+
+
+SPANS = [
+    TranscriptSpan(0.0, 4.2, "Today I'll explain the test pattern."),
+    TranscriptSpan(4.2, 8.9, "Actually, I mean the colour bars."),
+    TranscriptSpan(8.9, 11.5, "That's the whole idea."),
+]
+
+
+@pytest.fixture
+def clip(tmp_path) -> Path:
+    footage = tmp_path / "footage"
+    footage.mkdir()
+    return make_clip(footage / "talking-head.mp4")
+
+
+@pytest.fixture
+def home(tmp_path) -> Path:
+    return tmp_path / "clipcon-home"

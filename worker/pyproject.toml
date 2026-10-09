@@ -1,0 +1,21 @@
+[project]
+name = "clipcon-worker"
+version = "0.1.0"
+description = "Clipcon local indexing worker: FFmpeg, whisper.cpp, Ollama, SQLite."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+clipcon-worker = "clipcon_worker.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["real: runs installed whisper.cpp and Ollama models (slow; opt in with -m real)"]
+addopts = "-m 'not real'"
