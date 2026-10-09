@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("import-folder")
     p.add_argument("--project", required=True)
     p.add_argument("source", type=Path, metavar="folder")
+    p = sub.add_parser("remove-clips", help="forget clips' saved context (original files are not touched)")
+    p.add_argument("--project", required=True)
+    p.add_argument("clip_ids", nargs="+")
+    p = sub.add_parser("delete-project", help="forget a Project's saved context (original files are not touched)")
+    p.add_argument("--project", required=True)
     p = sub.add_parser("snapshot")
     p.add_argument("--project", required=True)
     p = sub.add_parser("search", help="search the saved index (reads only; starts no model)")
@@ -78,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
                 emit("result", projects=worker.store.projects())
             elif args.command == "create-project":
                 emit("result", project=worker.create_project(args.name, args.context))
+            elif args.command == "remove-clips":
+                worker.remove_clips(args.project, args.clip_ids)
+                emit("result", removed=args.clip_ids)
+            elif args.command == "delete-project":
+                worker.delete_project(args.project)
+                emit("result", deleted=args.project)
             elif args.command == "snapshot":
                 emit("result", snapshot=worker.snapshot(args.project))
             elif args.command in ("import", "import-folder"):

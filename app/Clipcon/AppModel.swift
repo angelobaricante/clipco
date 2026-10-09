@@ -51,6 +51,9 @@ final class AppModel {
     var isCheckingMcp = false
     var activity: ImportActivity?
     var errorMessage: String?
+    /// Awaiting confirmation in a destructive dialog.
+    var clipToRemove: SourceClip?
+    var projectToDelete: Project?
     var searchText = ""
     var searchResults: SearchPage?
     var isSearching = false
@@ -116,8 +119,50 @@ final class AppModel {
     }
 
     func open(_ project: Project) async throws {
+        guard project.id != self.project?.id else { return }
         self.project = project
+        clips = []
+        selection = nil
+        selectedHit = nil
+        searchText = ""
+        searchResults = nil
         try await reload()
+    }
+
+    /// Removal and deletion wait while footage is being imported, so an import never re-adds what was removed.
+    var canDelete: Bool { activity == nil }
+
+    /// Forgets a clip's saved context in Clipcon; the original video file stays where it is.
+    func remove(_ clip: SourceClip) async {
+        guard let project, canDelete else { return }
+        let next = visibleClips.drop { $0.id != clip.id }.dropFirst().first ?? visibleClips.last { $0.id != clip.id }
+        do {
+            try await worker.removeClips(projectID: project.id, clipIDs: [clip.id])
+            if selection == clip.id { selection = next?.id }
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            errorMessage = "Could not remove \(clip.originalFilename): \(error.localizedDescription)"
+        }
+    }
+
+    /// Forgets a Project and its saved context in Clipcon; the original video files stay where they are.
+    func delete(_ doomed: Project) async {
+        guard canDelete else { return }
+        do {
+            try await worker.deleteProject(projectID: doomed.id)
+            projects.removeAll { $0.id == doomed.id }
+            if project?.id == doomed.id {
+                project = nil
+                clips = []
+                selection = nil
+                searchText = ""
+                searchResults = nil
+                if let latest = projects.last { try await open(latest) }
+            }
+        } catch {
+            errorMessage = "Could not delete \(doomed.name): \(error.localizedDescription)"
+        }
     }
 
     func reload() async throws {

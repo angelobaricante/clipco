@@ -149,6 +149,54 @@ class Store:
             db.execute("ROLLBACK")
             raise
 
+    def _delete_clip(self, clip_id: str) -> None:
+        """Delete one clip's saved context rows (inside a caller's transaction)."""
+        db = self.db
+        for (seg_id,) in db.execute("SELECT id FROM segments WHERE clip_id=?", (clip_id,)).fetchall():
+            db.execute("DELETE FROM observations WHERE segment_id=?", (seg_id,))
+            db.execute("DELETE FROM frames WHERE segment_id=?", (seg_id,))
+            db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
+        db.execute("DELETE FROM segments WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM analyses WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM source_clips WHERE id=?", (clip_id,))
+
+    def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
+        """Remove clips and their saved context from a Project in one transaction; relationships are re-derived
+        from what remains. Original files are not touched."""
+        db = self.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for clip_id in clip_ids:
+                if not db.execute("SELECT 1 FROM source_clips WHERE id=? AND project_id=?",
+                                  (clip_id, project_id)).fetchone():
+                    raise ValueError(f"clip {clip_id} is not in project {project_id}")
+            db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
+            for clip_id in clip_ids:
+                self._delete_clip(clip_id)
+            self._relate(project_id)
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+
+    def delete_project(self, project_id: str) -> list[str]:
+        """Delete a Project and all its saved context in one transaction; returns the removed clip IDs."""
+        db = self.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if not self.project(project_id):
+                raise ValueError(f"unknown project {project_id}")
+            clip_ids = [r[0] for r in db.execute("SELECT id FROM source_clips WHERE project_id=?", (project_id,))]
+            db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
+            for clip_id in clip_ids:
+                self._delete_clip(clip_id)
+            db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+            db.execute("COMMIT")
+            return clip_ids
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+
     def _relate(self, project_id: str) -> None:
         """Re-derive the Project's suggested relationships from its published Segments (inside publish's
         transaction, so readers never see relationships that disagree with the Segments they cite)."""

@@ -24,6 +24,12 @@ struct BrowserView: View {
                         ClipCard(clip: clip, isSelected: model.selection == clip.id,
                                  liveStage: clip.id == model.activity?.clipID ? model.activity?.stage : nil)
                             .onTapGesture { model.selection = clip.id }
+                            .contextMenu {
+                                Button("Remove from Project…", systemImage: "trash", role: .destructive) {
+                                    model.clipToRemove = clip
+                                }
+                                .disabled(!model.canDelete)
+                            }
                     }
                 }
                 .padding(16)
@@ -31,6 +37,9 @@ struct BrowserView: View {
             .focusable()
             .focusEffectDisabled()
             .onMoveCommand(perform: move)
+            .onDeleteCommand {  // the Delete key and Edit ▸ Delete
+                if model.canDelete, let clip = model.selectedClip { model.clipToRemove = clip }
+            }
         }
     }
 

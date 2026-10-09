@@ -21,6 +21,28 @@ enum AutomationRun {
         let defaults = UserDefaults.standard
         // `-ClipconShowSetup YES` opens the setup sheet, e.g. to capture the Codex connection check.
         if defaults.bool(forKey: "ClipconShowSetup") { model.showSetup = true }
+        // `-ClipconAutomationRemove <filename>` and/or `-ClipconAutomationDeleteProject <name>` exercise removal
+        // through the same model calls as the confirmation dialogs, then write a report.
+        let removing = defaults.string(forKey: "ClipconAutomationRemove")
+        let deleting = defaults.string(forKey: "ClipconAutomationDeleteProject")
+        if removing != nil || deleting != nil, let out = defaults.string(forKey: "ClipconAutomationOut") {
+            var report: [String: Any] = [:]
+            if let name = removing, let clip = model.clips.first(where: { $0.originalFilename == name }) {
+                await model.remove(clip)
+                report["clips_after_remove"] = model.clips.map(\.originalFilename)
+            }
+            if let name = deleting, let project = model.projects.first(where: { $0.name == name }) {
+                await model.delete(project)
+                report["projects_after_delete"] = model.projects.map(\.name)
+                report["open_project"] = model.project?.name
+            }
+            report["error"] = model.errorMessage
+            let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            try? FileManager.default.createDirectory(at: URL(filePath: out), withIntermediateDirectories: true)
+            try? data?.write(to: URL(filePath: out).appending(path: "report.json"))
+            if defaults.bool(forKey: "ClipconAutomationQuit") { NSApp.terminate(nil) }
+            return
+        }
         guard let path = defaults.string(forKey: "ClipconAutomationImport"),
               let out = defaults.string(forKey: "ClipconAutomationOut") else { return }
         let outDir = URL(filePath: out)

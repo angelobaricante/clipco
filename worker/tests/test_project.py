@@ -312,3 +312,45 @@ def test_a_roll_is_someone_speaking_to_camera_for_most_of_the_clip(home, tmp_pat
     assert clips["silent-broll.mp4"]["role"] == "b-roll"
     basis = clips["to-camera.mp4"]["role_basis"]
     assert "speech covers" in basis and "facing the camera" in basis
+
+
+def test_removing_a_clip_deletes_its_saved_context_but_never_the_original(home, tmp_path):
+    from conftest import sha256
+
+    project, worker = line_project(home, tmp_path)
+    pid = project["id"]
+    clips = {c["original_filename"]: c for c in worker.snapshot(pid)["clips"]}
+    broll = clips["broll-1-pour.mp4"]
+    original = Path(broll["source_path"])
+    before = sha256(original)
+    old_segment = broll["segments"][0]["id"]
+
+    worker.remove_clips(pid, [broll["id"]])
+
+    overview, found, ctx, explained = call(
+        home, ("get_project_overview", {"project_id": pid}),
+        ("search_footage", {"project_id": pid, "query": "murky water jug"}),
+        ("get_segment_context", {"segment_id": old_segment}),
+        ("search_footage", {"project_id": pid, "query": "pour the dirty water into the top bucket"}))
+    assert "broll-1-pour.mp4" not in {c["original_filename"] for c in payload(overview)["clips"]}
+    assert all(r["original_filename"] != "broll-1-pour.mp4" for r in payload(found)["results"])
+    assert ctx.is_error  # its Segments no longer exist
+    assert all(rel["original_filename"] != "broll-1-pour.mp4"
+               for r in payload(explained)["results"] for rel in r["relationships"])
+    assert original.exists() and sha256(original) == before
+    assert not (home / "frames" / broll["id"]).exists()  # Clipcon's own frame cache is cleaned up
+
+
+def test_deleting_a_project_leaves_other_projects_and_all_originals(home, tmp_path):
+    project, worker = line_project(home, tmp_path)
+    other = worker.create_project("Another video")
+    footage = [Path(c["source_path"]) for c in worker.snapshot(project["id"])["clips"]]
+
+    worker.delete_project(project["id"])
+
+    [listing, gone] = call(home, ("get_project_overview", {}),
+                           ("get_project_overview", {"project_id": project["id"]}))
+    assert [p["project_id"] for p in payload(listing)["projects"]] == [other["id"]]
+    assert gone.is_error
+    assert all(p.exists() for p in footage)
+    assert not any((home / "frames").iterdir())

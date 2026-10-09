@@ -141,6 +141,16 @@ struct WorkerClient: Sendable {
         return page
     }
 
+    /// Forgets clips' saved context and frame cache. The original video files are never touched.
+    func removeClips(projectID: String, clipIDs: [String]) async throws {
+        _ = try await run(["remove-clips", "--project", projectID] + clipIDs)
+    }
+
+    /// Forgets a Project and all its saved context. The original video files are never touched.
+    func deleteProject(projectID: String) async throws {
+        _ = try await run(["delete-project", "--project", projectID])
+    }
+
     func importFolder(projectID: String, folder: URL,
                       onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
         try await run(["import-folder", "--project", projectID, folder.path], onEvent: onProgress)

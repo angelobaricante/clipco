@@ -33,6 +33,26 @@ struct ContentView: View {
                     .help("Show or hide the inspector (⌘I)")
             }
         }
+        .confirmationDialog(
+            "Remove “\(model.clipToRemove?.originalFilename ?? "")” from this Project?",
+            isPresented: Binding(get: { model.clipToRemove != nil }, set: { if !$0 { model.clipToRemove = nil } }),
+            presenting: model.clipToRemove
+        ) { clip in
+            Button("Remove from Project", role: .destructive) { Task { await model.remove(clip) } }
+        } message: { _ in
+            Text("Clipcon deletes its transcript, frame observations, and suggested relationships for this clip. "
+                 + "The original video file stays where it is.")
+        }
+        .confirmationDialog(
+            "Delete the Project “\(model.projectToDelete?.name ?? "")”?",
+            isPresented: Binding(get: { model.projectToDelete != nil }, set: { if !$0 { model.projectToDelete = nil } }),
+            presenting: model.projectToDelete
+        ) { project in
+            Button("Delete Project", role: .destructive) { Task { await model.delete(project) } }
+        } message: { _ in
+            Text("Clipcon deletes the saved context for every clip in this Project, and Codex can no longer "
+                 + "retrieve it. Your original video files are not affected.")
+        }
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .sheet(isPresented: $model.showSetup) { SetupSheet() }
         .alert("Something went wrong", isPresented: Binding(
@@ -45,17 +65,53 @@ struct ContentView: View {
     }
 }
 
+/// A sidebar row: a footage filter of the open Project, or another Project to open.
+enum SidebarItem: Hashable {
+    case filter(FootageFilter)
+    case project(Project.ID)
+}
+
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
-        List(selection: $model.filter) {
+        List(selection: Binding<SidebarItem?>(
+            get: { .filter(model.filter) },
+            set: { item in
+                switch item {
+                case .filter(let filter): model.filter = filter
+                case .project(let id):
+                    guard let project = model.projects.first(where: { $0.id == id }) else { return }
+                    Task {
+                        do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
+                    }
+                case nil: break
+                }
+            })
+        ) {
             Section(model.project?.name ?? "No Project") {
                 ForEach(FootageFilter.allCases) { filter in
                     Label(filter.rawValue, systemImage: filter.symbol)
                         .badge(model.count(filter))
-                        .tag(filter)
+                        .tag(SidebarItem.filter(filter))
+                }
+            }
+            if !model.projects.isEmpty {
+                Section("Projects") {
+                    ForEach(model.projects) { project in
+                        let isOpen = project.id == model.project?.id
+                        Label(project.name, systemImage: isOpen ? "folder.fill" : "folder")
+                            .fontWeight(isOpen ? .semibold : .regular)
+                            .tag(SidebarItem.project(project.id))
+                            .accessibilityAddTraits(isOpen ? .isSelected : [])
+                            .contextMenu {
+                                Button("Delete Project…", systemImage: "trash", role: .destructive) {
+                                    model.projectToDelete = project
+                                }
+                                .disabled(!model.canDelete)
+                            }
+                    }
                 }
             }
         }

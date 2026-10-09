@@ -118,6 +118,17 @@ class Worker:
     def snapshot(self, project_id: str) -> dict:
         return self.store.snapshot(project_id)
 
+    def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
+        """Forget clips: their saved context and Clipcon's frame cache. The original video files stay untouched."""
+        self.store.remove_clips(project_id, clip_ids)
+        for clip_id in clip_ids:
+            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+
+    def delete_project(self, project_id: str) -> None:
+        """Forget a Project and all its clips' saved context. The original video files stay untouched."""
+        for clip_id in self.store.delete_project(project_id):
+            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+
     def analysis_key(self, content_fingerprint: str) -> str:
         material = json.dumps({"source": content_fingerprint, "recipe": self.recipe,
                                "speech": self.speech.identity, "vision": self.vision.identity}, sort_keys=True)
