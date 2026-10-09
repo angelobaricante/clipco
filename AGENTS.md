@@ -23,11 +23,11 @@ architect runners: codex:default@medium, codex:default@medium, codex:default@med
 interrogate reviewers: codex:default@medium, codex:default@medium, codex:default@medium
 <!-- pstack-models:end -->
 
-# Clipcon session context
+# Clipco session context
 
-Clipcon prepares local footage context for an editing agent. It is not a video editor. The approved MVP is native SwiftUI plus a Python worker using local Ollama/Qwen3.5, whisper.cpp, FFmpeg, and SQLite, with five read-only MCP tools for Codex.
+Clipco prepares local footage context for an editing agent. It is not a video editor. The approved MVP is native SwiftUI plus a Python worker using local Ollama/Qwen3.5, whisper.cpp, FFmpeg, and SQLite, with five read-only MCP tools for Codex.
 
-Read `docs/TRACKER.md`, `GLOSSARY.md`, the live GitHub specification at https://github.com/angelobaricante/clipcon/issues/1, and the selected implementation issue/comments before starting. Check native blockers and active claims. Work one approved task at a time and leave a progress/validation/branch handoff comment before ending a session.
+Read `docs/TRACKER.md`, `GLOSSARY.md`, the live GitHub specification at https://github.com/angelobaricante/clipco/issues/1, and the selected implementation issue/comments before starting. Check native blockers and active claims. Work one approved task at a time and leave a progress/validation/branch handoff comment before ending a session.
 
 The approved interface is Variant D's Mac sidebar/browser/inspector workflow. Its reference is `docs/design/macos-design-notes.md` and `docs/design/macos-workspace.jpg`. Use real native system controls; prototype artwork and simulated controls are not production evidence. Keep inference and long-running work off the UI main thread.
 

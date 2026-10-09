@@ -29,11 +29,11 @@ def tool_name(item: dict) -> str | None:
             "Extension": f"extension:{item.get('kind')}"}.get(kind)
 
 
-# Where Clipcon keeps its index: a direct-inspection route that reads these is not a clean baseline.
-INDEX_MARKERS = ("Application Support/Clipcon", "index.sqlite", "clipcon-mcp", "clipcon-worker")
+# Where Clipco keeps its index: a direct-inspection route that reads these is not a clean baseline.
+INDEX_MARKERS = ("Application Support/Clipco", "index.sqlite", "clipco-mcp", "clipco-worker")
 
 
-def reads_clipcon_index(item: dict) -> bool:
+def reads_clipco_index(item: dict) -> bool:
     command = item.get("command")
     text = " ".join(command) if isinstance(command, list) else str(command or "")
     return item.get("type") == "CommandExecution" and any(m in text for m in INDEX_MARKERS)
@@ -69,7 +69,7 @@ def summarize_rollout(lines: list[str]) -> dict:
             turns[current] = {"turn_id": current, "answer": None, "_start": at, "_end": None, "model_requests": 0,
                               "input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0,
                               "reasoning_output_tokens": 0, "_tools": Counter(), "failed_tool_calls": 0,
-                              "tool_result_text_chars": 0, "tool_result_images": 0, "clipcon_index_reads": 0}
+                              "tool_result_text_chars": 0, "tool_result_images": 0, "clipco_index_reads": 0}
         elif kind == "token_usage_record" and payload.get("turn_id") in turns:
             turn, usage = turns[payload["turn_id"]], payload["usage"]
             turn["model_requests"] += 1
@@ -82,7 +82,7 @@ def summarize_rollout(lines: list[str]) -> dict:
             if name := tool_name(item):
                 turn["_tools"][name] += 1
                 turn["failed_tool_calls"] += failed(item)
-                turn["clipcon_index_reads"] += reads_clipcon_index(item)
+                turn["clipco_index_reads"] += reads_clipco_index(item)
         elif sub in ("function_call_output", "custom_tool_call_output") and current in turns:
             for part in output_parts(payload.get("output")):
                 if part.get("type") == "input_image":
@@ -108,7 +108,7 @@ def summarize_rollout(lines: list[str]) -> dict:
 #
 # Both routes get the same prompt, model and settings: a scratch working folder they may write to (sampled
 # frames, extracted audio) and the footage folder, outside it, which the sandbox leaves read-only. The only
-# difference is whether the clipcon MCP server is enabled. Other configured MCP servers are disabled on both
+# difference is whether the clipco MCP server is enabled. Other configured MCP servers are disabled on both
 # routes so they add no tool overhead to either. Request 1 starts a session (initial discovery); the rest
 # resume it, and request 1 is asked again at the end (repeat / cache reuse).
 
@@ -128,7 +128,7 @@ def configured_mcp_servers(config: Path) -> list[str]:
 
 def run_route(codex: str, route: str, model: str, footage: Path, queries: list[str], sessions: Path,
               servers: list[str], workdir: Path) -> dict:
-    disabled = [s for s in servers if route == "baseline" or s != "clipcon"]
+    disabled = [s for s in servers if route == "baseline" or s != "clipco"]
     overrides = [arg for s in disabled for arg in ("-c", f"mcp_servers.{s}.enabled=false")]
     # `exec resume` takes no -s/-C, so the sandbox is pinned by config for every request alike.
     common = ["--json", "--skip-git-repo-check", "-m", model, "-c", 'sandbox_mode="workspace-write"', *overrides]
@@ -156,13 +156,13 @@ def run_route(codex: str, route: str, model: str, footage: Path, queries: list[s
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="clipcon-benchmark",
-                                     description="Compare direct inspection with Clipcon MCP retrieval in Codex.")
+    parser = argparse.ArgumentParser(prog="clipco-benchmark",
+                                     description="Compare direct inspection with Clipco MCP retrieval in Codex.")
     parser.add_argument("--codex", default="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex")
     parser.add_argument("--model", required=True, help="the same Codex model for both routes")
     parser.add_argument("--footage", type=Path, required=True, help="folder holding the Project's originals")
     parser.add_argument("--queries", type=Path, required=True, help='JSON: [{"request": ..., "expected": [...]}]')
-    parser.add_argument("--out", type=Path, default=Path.home() / ".clipcon" / "evidence")
+    parser.add_argument("--out", type=Path, default=Path.home() / ".clipco" / "evidence")
     parser.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
     parser.add_argument("--routes", nargs="+", default=["baseline", "mcp"], choices=["baseline", "mcp"])
     parser.add_argument("--send-footage-to-codex", action="store_true",
@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
               "footage": str(args.footage), "requests": spec, "routes": []}
     for route in args.routes:
         print(f"running {route} route ({len(queries) + 1} requests)…", file=sys.stderr)
-        with tempfile.TemporaryDirectory(prefix=f"clipcon-bench-{route}-") as workdir:
+        with tempfile.TemporaryDirectory(prefix=f"clipco-bench-{route}-") as workdir:
             report["routes"].append(run_route(args.codex, route, args.model, args.footage.resolve(), queries,
                                               args.codex_home / "sessions", servers, Path(workdir)))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -187,8 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     path.write_text(json.dumps(report, indent=2) + "\n")
     print(table(report))
     print(f"\nReport: {path}\nGrade each answer against `expected` by hand before quoting any result.")
-    if any(t["clipcon_index_reads"] for r in report["routes"] if r["route"] == "baseline" for t in r["turns"]):
-        print("WARNING: the baseline read Clipcon's own index through the shell; it is not a clean baseline.")
+    if any(t["clipco_index_reads"] for r in report["routes"] if r["route"] == "baseline" for t in r["turns"]):
+        print("WARNING: the baseline read Clipco's own index through the shell; it is not a clean baseline.")
     return 0
 
 
@@ -201,7 +201,7 @@ def table(report: dict) -> str:
             rows.append(f"| {route['route']} | {t.get('request', t['turn_id'])} | {t['input_tokens']} | "
                         f"{t['cached_input_tokens']} | {t['uncached_input_tokens']} | {t['output_tokens']} | "
                         f"{t['model_requests']} | {tools} | {t['failed_tool_calls']} | "
-                        f"{t['tool_result_text_chars']} | {t['tool_result_images']} | {t['clipcon_index_reads']} | "
+                        f"{t['tool_result_text_chars']} | {t['tool_result_images']} | {t['clipco_index_reads']} | "
                         f"{t['wall_seconds']} |")
     return "\n".join(rows)
 

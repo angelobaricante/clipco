@@ -1,6 +1,6 @@
-# Clipcon — reusable B-roll library and adaptive indexing
+# Clipco — reusable B-roll library and adaptive indexing
 
-Status: ready-for-agent. Published as [specification #15](https://github.com/angelobaricante/clipcon/issues/15). The creator accepted all 21 design decisions and confirmed the consolidated scope on 2026-10-10 (Asia/Manila). GitHub is the authoritative tracker.
+Status: ready-for-agent. Published as [specification #15](https://github.com/angelobaricante/clipco/issues/15). The creator accepted all 21 design decisions and confirmed the consolidated scope on 2026-10-10 (Asia/Manila). GitHub is the authoritative tracker.
 
 ## Problem Statement
 
@@ -144,9 +144,9 @@ The parent issue is a specification, not an independently claimable implementati
 
 | Order | Native sub-issue | Blocked by |
 | --- | --- | --- |
-| 1 | [#16 — Share library sources across Projects and review Segment roles](https://github.com/angelobaricante/clipcon/issues/16) | None; check claims |
-| 2 | [#17 — Discover reusable B-roll across the library with grounded emotional tone](https://github.com/angelobaricante/clipcon/issues/17) | #16 |
-| 3 | [#18 — Create Projects easily and import dropped footage through a recoverable queue](https://github.com/angelobaricante/clipcon/issues/18) | #17 |
-| 4 | [#19 — Adapt indexing concurrency to device resources with measured Auto processing](https://github.com/angelobaricante/clipcon/issues/19) | #18 |
+| 1 | [#16 — Share library sources across Projects and review Segment roles](https://github.com/angelobaricante/clipco/issues/16) | None; check claims |
+| 2 | [#17 — Discover reusable B-roll across the library with grounded emotional tone](https://github.com/angelobaricante/clipco/issues/17) | #16 |
+| 3 | [#18 — Create Projects easily and import dropped footage through a recoverable queue](https://github.com/angelobaricante/clipco/issues/18) | #17 |
+| 4 | [#19 — Adapt indexing concurrency to device resources with measured Auto processing](https://github.com/angelobaricante/clipco/issues/19) | #18 |
 
-The confirmed design, updated glossary, and ADRs are available on the [design/specification branch](https://github.com/angelobaricante/clipcon/tree/codex/reusable-footage-design). Read that approved vocabulary until these documents are integrated into the implementation baseline.
+The confirmed design, updated glossary, and ADRs are available on the [design/specification branch](https://github.com/angelobaricante/clipco/tree/codex/reusable-footage-design). Read that approved vocabulary until these documents are integrated into the implementation baseline.

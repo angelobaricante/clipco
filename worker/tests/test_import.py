@@ -1,6 +1,6 @@
 from conftest import SPANS, RecordedSpeech, RecordedVision
 
-from clipcon_worker.pipeline import Worker
+from clipco_worker.pipeline import Worker
 
 
 def test_importing_a_clip_saves_source_grounded_context(home, clip):
@@ -84,7 +84,7 @@ def test_changed_analysis_configuration_reanalyses_with_the_same_clip_identity(h
 
 def test_inference_failure_marks_the_clip_failed_without_partial_context(home, clip):
     import pytest
-    from clipcon_worker.vision import InferenceError
+    from clipco_worker.vision import InferenceError
 
     worker = Worker(home, speech=RecordedSpeech(SPANS), vision=RecordedVision(fail=True))
     project = worker.create_project("Tutorial")
@@ -103,7 +103,7 @@ def test_inference_failure_marks_the_clip_failed_without_partial_context(home, c
 
 def test_an_interpretation_citing_no_supplied_evidence_is_not_saved(home, clip):
     import pytest
-    from clipcon_worker.vision import InferenceError
+    from clipco_worker.vision import InferenceError
 
     vision = RecordedVision(only_invented=True)
     worker = Worker(home, speech=RecordedSpeech(SPANS), vision=vision)
@@ -118,7 +118,7 @@ def test_an_interpretation_citing_no_supplied_evidence_is_not_saved(home, clip):
 
 
 def test_the_detected_spoken_language_is_saved_with_the_clip(home, clip):
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.speech import TranscriptSpan
 
     taglish = [TranscriptSpan(0.0, 5.0, "Ngayon, ipapakita ko kung paano gumagana ang water filter."),
                TranscriptSpan(5.0, 11.0, "Actually, hindi chamber, yung upper tank pala.")]
@@ -134,7 +134,7 @@ def test_the_detected_spoken_language_is_saved_with_the_clip(home, clip):
 
 
 def test_non_speech_annotations_are_not_saved_as_transcript(home, clip):
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.speech import TranscriptSpan
 
     spans = [TranscriptSpan(0.0, 3.0, "(speaking in foreign language)"),
              TranscriptSpan(3.0, 6.0, "[BLANK_AUDIO]"),
@@ -150,7 +150,7 @@ def test_non_speech_annotations_are_not_saved_as_transcript(home, clip):
 
 
 def test_a_repetition_loop_from_speech_recognition_is_collapsed(home, clip):
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.speech import TranscriptSpan
 
     looped = [TranscriptSpan(0.0, 2.0, "Tapos pipilihin ni ate doon."),
               TranscriptSpan(2.0, 3.0, "Check."), TranscriptSpan(3.0, 4.0, "Check."),  # a real short repeat stays
@@ -183,18 +183,18 @@ def test_the_project_description_reaches_agents_but_not_the_clip_descriptions(ho
     from conftest import make_clip
     from test_mcp import call, payload
 
-    from clipcon_worker.vision import SYSTEM_PROMPT, build_prompt
+    from clipco_worker.vision import SYSTEM_PROMPT, build_prompt
 
     vision = RecordedVision()
     worker = Worker(home, speech=RecordedSpeech([]), vision=vision)
-    project = worker.create_project("Demo", "Showing how to use clipcon")
+    project = worker.create_project("Demo", "Showing how to use clipco")
     worker.import_clip(project["id"], make_clip(tmp_path / "silent.mp4", seconds=6.0, audio=False))
 
     prompts = [SYSTEM_PROMPT + build_prompt(r) for r in vision.requests]
-    assert prompts and not any("clipcon" in p.lower() or "how to use" in p for p in prompts)
+    assert prompts and not any("clipco" in p.lower() or "how to use" in p for p in prompts)
     # With no speech, the model is told not to claim anyone is talking or explaining.
     assert all("no speech" in build_prompt(r) for r in vision.requests)
     assert "do not say anyone is speaking" in SYSTEM_PROMPT.lower()
 
     overview = payload(call(home, ("get_project_overview", {"project_id": project["id"]}))[0])
-    assert overview["project"]["context"] == "Showing how to use clipcon"
+    assert overview["project"]["context"] == "Showing how to use clipco"

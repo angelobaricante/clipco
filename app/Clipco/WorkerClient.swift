@@ -24,16 +24,16 @@ private final class RunningProcess: @unchecked Sendable {
 /// Runs the local Python worker as a subprocess and streams its JSON-lines events.
 /// All process and pipe work happens off the main actor.
 struct WorkerClient: Sendable {
-    /// Dev demo layout: the worker lives beside the app sources unless CLIPCON_WORKER_DIR overrides it.
+    /// Dev demo layout: the worker lives beside the app sources unless CLIPCO_WORKER_DIR overrides it.
     let workerDirectory: URL = {
-        if let dir = ProcessInfo.processInfo.environment["CLIPCON_WORKER_DIR"] {
+        if let dir = ProcessInfo.processInfo.environment["CLIPCO_WORKER_DIR"] {
             return URL(filePath: dir)
         }
         return URL(filePath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appending(path: "worker")
     }()
 
-    var executable: URL { workerDirectory.appending(path: ".venv/bin/clipcon-worker") }
+    var executable: URL { workerDirectory.appending(path: ".venv/bin/clipco-worker") }
 
     var isInstalled: Bool { FileManager.default.isExecutableFile(atPath: executable.path) }
 
@@ -86,9 +86,9 @@ struct WorkerClient: Sendable {
         return last
     }
 
-    /// Worker diagnostics (stderr) are appended to ~/.clipcon/logs/worker.log.
+    /// Worker diagnostics (stderr) are appended to ~/.clipco/logs/worker.log.
     private static func logHandle() -> FileHandle? {
-        let dir = URL(filePath: NSHomeDirectory()).appending(path: ".clipcon/logs")
+        let dir = URL(filePath: NSHomeDirectory()).appending(path: ".clipco/logs")
         let log = dir.appending(path: "worker.log")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: log.path) {

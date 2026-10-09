@@ -11,11 +11,11 @@ from pathlib import Path
 from . import roles
 from .text import matches, terms, words
 
-DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipcon"
+DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipco"
 
 
 def default_home() -> Path:
-    return Path(os.environ.get("CLIPCON_HOME", DEFAULT_HOME))
+    return Path(os.environ.get("CLIPCO_HOME", DEFAULT_HOME))
 
 
 SEARCH_PAGE = 5
@@ -46,7 +46,7 @@ STATUS_NOTES = {
     "pending": "Not analysed yet; no context is saved for it.",
     "indexing": "Being analysed now. Any context shown is from its previous analysis and may be replaced.",
     "failed": "Its last analysis failed. Any context shown is from an earlier analysis and is not current; "
-              "the creator can retry it in Clipcon.",
+              "the creator can retry it in Clipco.",
     "stale": "Its original or the analysis settings changed since it was indexed. This saved context may not "
              "describe the footage; do not rely on it until the creator re-analyses the clip.",
     "missing": "Its original file is not at the indexed location. The saved context describes it, but there is "
@@ -123,13 +123,13 @@ class Index:
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         if not self.path.exists():
-            raise RetrievalError(f"no footage index at {self.path}; import footage in Clipcon first")
+            raise RetrievalError(f"no footage index at {self.path}; import footage in Clipco first")
         db = sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
             db.execute("BEGIN")
             if "project_id" in {r["name"] for r in db.execute("PRAGMA table_info(source_clips)")}:
-                raise RetrievalError("this footage index predates the Footage library; open Clipcon once so it "
+                raise RetrievalError("this footage index predates the Footage library; open Clipco once so it "
                                      "can migrate the index (no footage is re-analysed)")
             yield db
         finally:
@@ -369,7 +369,7 @@ class Index:
                 "transcript": "local speech recognition (timestamps from alignment)",
                 "observations": "local vision model describing sampled frames only",
                 "interpretation": "local model inference citing the evidence_ids above",
-                "creator_notes": "written by the creator in Clipcon about the whole Source clip for the named "
+                "creator_notes": "written by the creator in Clipco about the whole Source clip for the named "
                                  "Project; not model output",
                 "segment_role": "suggested in code from this Segment's speech coverage and sampled frames; "
                                 "`creator` is the creator's correction, which takes precedence",
@@ -389,7 +389,7 @@ class Index:
 
     def preview(self, segment_id: str, frame_id: str | None = None, project_id: str | None = None,
                 scope: str | None = None) -> tuple[dict, bytes]:
-        """A sampled frame Clipcon saved for this Segment (not a new decode of the source)."""
+        """A sampled frame Clipco saved for this Segment (not a new decode of the source)."""
         with self._connect() as db:
             seg = self._segment(db, segment_id)
             scoped = self._scope(db, seg, project_id, scope)
@@ -403,7 +403,7 @@ class Index:
             raise RetrievalError(f"frame {frame_id!r} was not sampled for segment {segment_id}; sampled: {sampled}")
         path = Path(frame["path"])
         if not path.is_file():
-            raise RetrievalError(f"sampled frame {frame['id']} is no longer in Clipcon's cache; re-analyse the clip")
+            raise RetrievalError(f"sampled frame {frame['id']} is no longer in Clipco's cache; re-analyse the clip")
         data = path.read_bytes()
         if len(data) > PREVIEW_BYTES_MAX:
             raise RetrievalError(f"sampled frame {frame['id']} exceeds the {PREVIEW_BYTES_MAX}-byte preview limit")
@@ -439,8 +439,8 @@ class Index:
                "index_status": status, "revision": seg["revision"]}
         if status != "ready":
             return {**out, "available": False, "state": status,
-                    "detail": f"Clipcon marks this clip {status}. {STATUS_NOTES[status]} "
-                              "Ask the creator to resolve it in Clipcon."}
+                    "detail": f"Clipco marks this clip {status}. {STATUS_NOTES[status]} "
+                              "Ask the creator to resolve it in Clipco."}
         path = Path(seg["source_path"])
         return {**out, "available": True, "state": "available", "path": str(path), "file_url": path.as_uri(),
                 "note": "A locator only: it grants no new filesystem permission. Read the file with your own "

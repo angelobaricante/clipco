@@ -12,17 +12,17 @@ final class ProbeState {
 /// Debug-only behavioral check of the real app: imports a clip through the same AppModel path
 /// as the Import sheet, interacts with the window during analysis, and measures main-thread stalls.
 ///
-///   open Clipcon.app --args -ClipconAutomationImport /path/clip.mp4 \
-///     -ClipconAutomationProject "Name" -ClipconAutomationContext "..." -ClipconAutomationOut /tmp/out
-///     [-ClipconAutomationSearch "query"]   (the import path may also be a folder)
+///   open Clipco.app --args -ClipcoAutomationImport /path/clip.mp4 \
+///     -ClipcoAutomationProject "Name" -ClipcoAutomationContext "..." -ClipcoAutomationOut /tmp/out
+///     [-ClipcoAutomationSearch "query"]   (the import path may also be a folder)
 @MainActor
 enum AutomationRun {
     /// Review workflow on a real Project: selection across inspector/view changes, filters, verified playback
     /// access, then (optionally) a note and exclusion through the same model calls the inspector uses.
     ///
-    ///   Clipcon -ClipconAutomationReview <filename> -ClipconAutomationOut /tmp/out
-    ///     [-ClipconAutomationNote "text"] [-ClipconAutomationExclude YES|NO] [-ClipconAutomationSearch "query"]
-    ///     [-ClipconAutomationMode list] [-ClipconAutomationTab context|transcript|info] [-ClipconAutomationHold 8]
+    ///   Clipco -ClipcoAutomationReview <filename> -ClipcoAutomationOut /tmp/out
+    ///     [-ClipcoAutomationNote "text"] [-ClipcoAutomationExclude YES|NO] [-ClipcoAutomationSearch "query"]
+    ///     [-ClipcoAutomationMode list] [-ClipcoAutomationTab context|transcript|info] [-ClipcoAutomationHold 8]
     static func review(_ model: AppModel, clipNamed name: String, out: URL, defaults: UserDefaults) async {
         var report: [String: Any] = ["project": model.project?.name ?? NSNull()]
         guard let clip = model.clips.first(where: { $0.originalFilename == name }) else {
@@ -46,17 +46,17 @@ enum AutomationRun {
         preserved["grid_view"] = model.selection == [clip.id] && model.selectedClip?.id == clip.id
         report["selection_preserved"] = preserved
         report["source_access"] = String(describing: await SourceAccess.check(clip))
-        if let note = defaults.string(forKey: "ClipconAutomationNote") { await model.saveNote(note, for: clip.id) }
-        if defaults.object(forKey: "ClipconAutomationExclude") != nil {
+        if let note = defaults.string(forKey: "ClipcoAutomationNote") { await model.saveNote(note, for: clip.id) }
+        if defaults.object(forKey: "ClipcoAutomationExclude") != nil {
             let target = model.clips.filter { $0.id == clip.id }
-            await model.setExcluded(target, defaults.bool(forKey: "ClipconAutomationExclude"))
+            await model.setExcluded(target, defaults.bool(forKey: "ClipcoAutomationExclude"))
         }
-        // `-ClipconAutomationReuse YES|NO` and `-ClipconAutomationRole <segment index>:<role|suggested>` go through
+        // `-ClipcoAutomationReuse YES|NO` and `-ClipcoAutomationRole <segment index>:<role|suggested>` go through
         // the same model calls as the inspector's reuse switch and Segment role menus.
-        if defaults.object(forKey: "ClipconAutomationReuse") != nil {
-            await model.setReuse(clip, defaults.bool(forKey: "ClipconAutomationReuse"))
+        if defaults.object(forKey: "ClipcoAutomationReuse") != nil {
+            await model.setReuse(clip, defaults.bool(forKey: "ClipcoAutomationReuse"))
         }
-        if let change = defaults.string(forKey: "ClipconAutomationRole"), let colon = change.firstIndex(of: ":"),
+        if let change = defaults.string(forKey: "ClipcoAutomationRole"), let colon = change.firstIndex(of: ":"),
            let index = Int(change[..<colon]), let current = model.clips.first(where: { $0.id == clip.id }),
            current.segments.indices.contains(index) {
             let role = String(change[change.index(after: colon)...])
@@ -75,20 +75,20 @@ enum AutomationRun {
         }
         report["library"] = library
         report["counts"] = Dictionary(uniqueKeysWithValues: FootageFilter.allCases.map { ($0.rawValue, model.count($0)) })
-        if let query = defaults.string(forKey: "ClipconAutomationSearch") {
+        if let query = defaults.string(forKey: "ClipcoAutomationSearch") {
             model.searchText = query
             await model.search()
             report["search"] = model.searchResults?.results.map {
                 ["file": $0.originalFilename, "basis": $0.evidenceBasis, "excluded": $0.excluded]
             } ?? []
         }
-        model.browserMode = defaults.string(forKey: "ClipconAutomationMode") == "list" ? .list : .grid
-        model.inspectorTab = InspectorTab(rawValue: (defaults.string(forKey: "ClipconAutomationTab") ?? "context")
+        model.browserMode = defaults.string(forKey: "ClipcoAutomationMode") == "list" ? .list : .grid
+        model.inspectorTab = InspectorTab(rawValue: (defaults.string(forKey: "ClipcoAutomationTab") ?? "context")
             .capitalized) ?? .context
-        // `-ClipconAutomationPlay <seconds>` opens the player over the browser from that source time, lets it
+        // `-ClipcoAutomationPlay <seconds>` opens the player over the browser from that source time, lets it
         // play, then records the position and the transcript line the inspector highlights.
-        if defaults.object(forKey: "ClipconAutomationPlay") != nil {
-            await model.openPlayer(clip.id, at: defaults.double(forKey: "ClipconAutomationPlay"))
+        if defaults.object(forKey: "ClipcoAutomationPlay") != nil {
+            await model.openPlayer(clip.id, at: defaults.double(forKey: "ClipcoAutomationPlay"))
             try? await Task.sleep(for: .seconds(3))
             let spoken = model.spokenLineID(in: clip)
             let line = clip.segments.flatMap(\.transcript).first { $0.id == spoken }
@@ -112,7 +112,7 @@ enum AutomationRun {
         report["window_number"] = NSApp.windows.first { $0.isVisible }?.windowNumber ?? NSNull()
         report["error"] = model.errorMessage ?? NSNull()
         write(report, to: out)
-        try? await Task.sleep(for: .seconds(defaults.double(forKey: "ClipconAutomationHold")))
+        try? await Task.sleep(for: .seconds(defaults.double(forKey: "ClipcoAutomationHold")))
         NSApp.terminate(nil)
     }
 
@@ -120,8 +120,8 @@ enum AutomationRun {
     /// the Clip menu. Sources were already checked when the Project opened; the report records what the creator
     /// sees, then optionally locates the original and/or re-analyses, recording the stages shown meanwhile.
     ///
-    ///   Clipcon -ClipconAutomationRecover <filename> -ClipconAutomationOut /tmp/out
-    ///     [-ClipconAutomationLocate /path/to/moved.mov] [-ClipconAutomationRetry YES] [-ClipconAutomationHold 8]
+    ///   Clipco -ClipcoAutomationRecover <filename> -ClipcoAutomationOut /tmp/out
+    ///     [-ClipcoAutomationLocate /path/to/moved.mov] [-ClipcoAutomationRetry YES] [-ClipcoAutomationHold 8]
     static func recover(_ model: AppModel, clipNamed name: String, out: URL, defaults: UserDefaults) async {
         var report: [String: Any] = ["project": model.project?.name ?? NSNull()]
         func state(_ step: String) {
@@ -146,13 +146,13 @@ enum AutomationRun {
         model.inspectorTab = .context
         try? await Task.sleep(for: .milliseconds(600))
         state("on_open")
-        if let path = defaults.string(forKey: "ClipconAutomationLocate") {
+        if let path = defaults.string(forKey: "ClipcoAutomationLocate") {
             await model.locate(clip, at: URL(filePath: path))
             try? await Task.sleep(for: .milliseconds(600))
             state("after_locate")
             model.errorMessage = nil
         }
-        if defaults.bool(forKey: "ClipconAutomationRetry"), let current = model.clips.first(where: { $0.id == clip.id }) {
+        if defaults.bool(forKey: "ClipcoAutomationRetry"), let current = model.clips.first(where: { $0.id == clip.id }) {
             let started = Date()
             let probe = ProbeState()
             let stageWatch = Task { @MainActor in
@@ -179,8 +179,8 @@ enum AutomationRun {
         report["statuses"] = Dictionary(uniqueKeysWithValues: model.clips.map { ($0.originalFilename, $0.status.rawValue) })
         report["window_number"] = NSApp.windows.first { $0.isVisible }?.windowNumber ?? NSNull()
         write(report, to: out)
-        // `-ClipconAutomationHold <seconds>` keeps the window up, e.g. for `screencapture -l <window_number>`.
-        try? await Task.sleep(for: .seconds(defaults.double(forKey: "ClipconAutomationHold")))
+        // `-ClipcoAutomationHold <seconds>` keeps the window up, e.g. for `screencapture -l <window_number>`.
+        try? await Task.sleep(for: .seconds(defaults.double(forKey: "ClipcoAutomationHold")))
         NSApp.terminate(nil)
     }
 
@@ -192,23 +192,23 @@ enum AutomationRun {
 
     static func runIfRequested(_ model: AppModel) async {
         let defaults = UserDefaults.standard
-        if let name = defaults.string(forKey: "ClipconAutomationReview"),
-           let out = defaults.string(forKey: "ClipconAutomationOut") {
+        if let name = defaults.string(forKey: "ClipcoAutomationReview"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
             await review(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)
             return
         }
-        if let name = defaults.string(forKey: "ClipconAutomationRecover"),
-           let out = defaults.string(forKey: "ClipconAutomationOut") {
+        if let name = defaults.string(forKey: "ClipcoAutomationRecover"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
             await recover(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)
             return
         }
-        // `-ClipconShowSetup YES` opens the setup sheet, e.g. to capture the Codex connection check.
-        if defaults.bool(forKey: "ClipconShowSetup") { model.showSetup = true }
-        // `-ClipconAutomationRemove <filename>` and/or `-ClipconAutomationDeleteProject <name>` exercise removal
+        // `-ClipcoShowSetup YES` opens the setup sheet, e.g. to capture the Codex connection check.
+        if defaults.bool(forKey: "ClipcoShowSetup") { model.showSetup = true }
+        // `-ClipcoAutomationRemove <filename>` and/or `-ClipcoAutomationDeleteProject <name>` exercise removal
         // through the same model calls as the confirmation dialogs, then write a report.
-        let removing = defaults.string(forKey: "ClipconAutomationRemove")
-        let deleting = defaults.string(forKey: "ClipconAutomationDeleteProject")
-        if removing != nil || deleting != nil, let out = defaults.string(forKey: "ClipconAutomationOut") {
+        let removing = defaults.string(forKey: "ClipcoAutomationRemove")
+        let deleting = defaults.string(forKey: "ClipcoAutomationDeleteProject")
+        if removing != nil || deleting != nil, let out = defaults.string(forKey: "ClipcoAutomationOut") {
             var report: [String: Any] = [:]
             if let name = removing, let clip = model.clips.first(where: { $0.originalFilename == name }) {
                 await model.remove([clip])
@@ -223,11 +223,11 @@ enum AutomationRun {
             let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
             try? FileManager.default.createDirectory(at: URL(filePath: out), withIntermediateDirectories: true)
             try? data?.write(to: URL(filePath: out).appending(path: "report.json"))
-            if defaults.bool(forKey: "ClipconAutomationQuit") { NSApp.terminate(nil) }
+            if defaults.bool(forKey: "ClipcoAutomationQuit") { NSApp.terminate(nil) }
             return
         }
-        guard let path = defaults.string(forKey: "ClipconAutomationImport"),
-              let out = defaults.string(forKey: "ClipconAutomationOut") else { return }
+        guard let path = defaults.string(forKey: "ClipcoAutomationImport"),
+              let out = defaults.string(forKey: "ClipcoAutomationOut") else { return }
         let outDir = URL(filePath: out)
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         var report: [String: Any] = ["source": path]
@@ -261,8 +261,8 @@ enum AutomationRun {
             try? await Task.sleep(for: .milliseconds(300))
             model.showInspector.toggle()
             model.filter = .all
-            // Search the saved index while analysis is still running (`-ClipconAutomationSearch "query"`).
-            guard let query = defaults.string(forKey: "ClipconAutomationSearch") else { return }
+            // Search the saved index while analysis is still running (`-ClipcoAutomationSearch "query"`).
+            guard let query = defaults.string(forKey: "ClipcoAutomationSearch") else { return }
             while model.activity != nil && !model.clips.contains(where: { $0.status == .ready }) {
                 try? await Task.sleep(for: .milliseconds(500))
             }
@@ -276,8 +276,8 @@ enum AutomationRun {
         }
 
         await model.importFootage([URL(filePath: path)],
-                               newProjectName: defaults.string(forKey: "ClipconAutomationProject"),
-                               context: defaults.string(forKey: "ClipconAutomationContext") ?? "")
+                               newProjectName: defaults.string(forKey: "ClipcoAutomationProject"),
+                               context: defaults.string(forKey: "ClipcoAutomationContext") ?? "")
         report["import_seconds"] = Date().timeIntervalSince(started)
         state.probing = false
         _ = await (probe.value, stageWatch.value, interaction.value)
@@ -297,7 +297,7 @@ enum AutomationRun {
         }
         let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
         try? data?.write(to: outDir.appending(path: "report.json"))
-        if defaults.bool(forKey: "ClipconAutomationQuit") { NSApp.terminate(nil) }
+        if defaults.bool(forKey: "ClipcoAutomationQuit") { NSApp.terminate(nil) }
     }
 }
 #endif

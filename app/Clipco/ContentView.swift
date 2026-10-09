@@ -17,7 +17,7 @@ struct ContentView: View {
                         PlayerOverlay(clip: clip)
                     }
                 }
-                .navigationTitle(model.project?.name ?? "Clipcon")
+                .navigationTitle(model.project?.name ?? "Clipco")
                 .navigationSubtitle(model.trimmedQuery.isEmpty ? model.filter.rawValue : "Search")
                 .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search footage context")
                 .searchFocused($searchFocused)
@@ -88,7 +88,7 @@ struct ProjectDialogs: ViewModifier {
                 Button("Remove from Library", role: .destructive) { Task { await model.removeFromLibrary(clips) } }
             } message: { clips in
                 let projects = Set(clips.flatMap(\.projects).map(\.name)).sorted()
-                Text("Clipcon deletes the transcript, frame observations, roles, and every Project's notes for "
+                Text("Clipco deletes the transcript, frame observations, roles, and every Project's notes for "
                      + (clips.count == 1 ? "this clip" : "these clips")
                      + (projects.isEmpty ? "" : " (in \(projects.joined(separator: ", ")))")
                      + ". Codex can no longer retrieve it. The original video files are not affected.")
@@ -101,13 +101,13 @@ struct ProjectDialogs: ViewModifier {
             ) { project in
                 Button("Delete Project", role: .destructive) { Task { await model.delete(project) } }
             } message: { _ in
-                Text("Clipcon deletes this Project's notes and exclusions. Its footage stays in your Footage "
+                Text("Clipco deletes this Project's notes and exclusions. Its footage stays in your Footage "
                      + "library with its analysed context. Your original video files are not affected.")
             }
             #if DEBUG
-            // `-ClipconSelectionLog /path` records each selection change, to verify mouse selection from outside.
+            // `-ClipcoSelectionLog /path` records each selection change, to verify mouse selection from outside.
             .onChange(of: model.selection) {
-                guard let path = UserDefaults.standard.string(forKey: "ClipconSelectionLog") else { return }
+                guard let path = UserDefaults.standard.string(forKey: "ClipcoSelectionLog") else { return }
                 let names = model.clips.filter { model.selection.contains($0.id) }.map(\.originalFilename)
                 try? (names.sorted().joined(separator: ",") + "\n").write(toFile: path, atomically: true,
                                                                          encoding: .utf8)

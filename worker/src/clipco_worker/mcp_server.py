@@ -1,7 +1,7 @@
-"""Clipcon's read-only stdio MCP server for editing agents such as Codex.
+"""Clipco's read-only stdio MCP server for editing agents such as Codex.
 
 stdout carries only MCP protocol messages; diagnostics go to stderr. It reads the saved index and never
-starts Ollama, whisper.cpp, or any other model, so it answers while the Clipcon app is closed.
+starts Ollama, whisper.cpp, or any other model, so it answers while the Clipco app is closed.
 """
 
 import argparse
@@ -20,7 +20,7 @@ READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempot
                             open_world_hint=False)
 
 INSTRUCTIONS = (
-    "Clipcon supplies source-grounded context about a creator's raw footage; it does not edit video. "
+    "Clipco supplies source-grounded context about a creator's raw footage; it does not edit video. "
     "Start with get_project_overview (no arguments lists Projects), then search_footage with an explicit "
     "project_id for that Project's context (A-roll, corrections, takes, B-roll), or scope='library' for "
     "reusable B-roll across the creator's Footage library. Expand only the Segments you need with "
@@ -44,7 +44,7 @@ def failure(message: str) -> CallToolResult:
 
 def build(home: Path) -> MCPServer:
     index = Index(home)
-    server = MCPServer("clipcon", version=version("clipcon-worker"), instructions=INSTRUCTIONS)
+    server = MCPServer("clipco", version=version("clipco-worker"), instructions=INSTRUCTIONS)
 
     def guarded(fn) -> CallToolResult:
         try:
@@ -92,7 +92,7 @@ def build(home: Path) -> MCPServer:
     @server.tool(annotations=READ_ONLY)
     def get_segment_preview(segment_id: str, frame_id: str | None = None, project_id: str | None = None,
                             scope: str | None = None) -> CallToolResult:
-        """Show one real frame Clipcon sampled from a Segment (JPEG, at most 512 px wide), with its
+        """Show one real frame Clipco sampled from a Segment (JPEG, at most 512 px wide), with its
         source time. Defaults to the Segment's middle sampled frame; pass frame_id to choose another.
         """
         def preview() -> CallToolResult:
@@ -108,7 +108,7 @@ def build(home: Path) -> MCPServer:
                       project_id: str | None = None, scope: str | None = None) -> CallToolResult:
         """Verify the original Source clip is available and unchanged, and return its location with a
         validated source-relative range in seconds (default: the Segment's range). When `available` is
-        false there is no locator; do not guess a path. Clipcon never modifies originals.
+        false there is no locator; do not guess a path. Clipco never modifies originals.
         """
         return guarded(lambda: result(index.resolve_media(segment_id, start, end, project_id, scope)))
 
@@ -116,10 +116,10 @@ def build(home: Path) -> MCPServer:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="clipcon-mcp", description=__doc__)
+    parser = argparse.ArgumentParser(prog="clipco-mcp", description=__doc__)
     parser.add_argument("--home", type=Path, default=default_home())
     args = parser.parse_args(argv)
-    print(f"clipcon-mcp: serving {args.home / 'index.sqlite'} over stdio", file=sys.stderr)
+    print(f"clipco-mcp: serving {args.home / 'index.sqlite'} over stdio", file=sys.stderr)
     build(args.home).run("stdio")
     return 0
 

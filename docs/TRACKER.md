@@ -1,18 +1,18 @@
-# Clipcon implementation tracker
+# Clipco implementation tracker
 
-GitHub is the authoritative implementation tracker for `angelobaricante/clipcon`. Local scratch planning artifacts are historical context; GitHub issues and comments carry current task state across sessions.
+GitHub is the authoritative implementation tracker for `angelobaricante/clipco`. Local scratch planning artifacts are historical context; GitHub issues and comments carry current task state across sessions.
 
 ## Specification and tasks
 
 | Order | Issue | Depends on |
 | --- | --- | --- |
-| Spec | [Clipcon — macOS MVP specification](https://github.com/angelobaricante/clipcon/issues/1) | Approved product decisions |
-| 1 | [Import one source clip and review real local context](https://github.com/angelobaricante/clipcon/issues/2) | None |
-| 2 | [Retrieve indexed footage context through Codex MCP](https://github.com/angelobaricante/clipcon/issues/3) | Import one source clip |
-| 3 | [Find a spoken correction and supporting B-roll across a project](https://github.com/angelobaricante/clipcon/issues/4) | Codex MCP retrieval |
-| 4 | [Review footage context in the native Mac workspace](https://github.com/angelobaricante/clipcon/issues/5) | Project discovery |
-| 5 | [Recover unavailable or changed footage without losing good context](https://github.com/angelobaricante/clipcon/issues/6) | Native review |
-| 6 | [Prove offline usefulness and prepare the hackathon demonstration](https://github.com/angelobaricante/clipcon/issues/7) | Recovery |
+| Spec | [Clipco — macOS MVP specification](https://github.com/angelobaricante/clipco/issues/1) | Approved product decisions |
+| 1 | [Import one source clip and review real local context](https://github.com/angelobaricante/clipco/issues/2) | None |
+| 2 | [Retrieve indexed footage context through Codex MCP](https://github.com/angelobaricante/clipco/issues/3) | Import one source clip |
+| 3 | [Find a spoken correction and supporting B-roll across a project](https://github.com/angelobaricante/clipco/issues/4) | Codex MCP retrieval |
+| 4 | [Review footage context in the native Mac workspace](https://github.com/angelobaricante/clipco/issues/5) | Project discovery |
+| 5 | [Recover unavailable or changed footage without losing good context](https://github.com/angelobaricante/clipco/issues/6) | Native review |
+| 6 | [Prove offline usefulness and prepare the hackathon demonstration](https://github.com/angelobaricante/clipco/issues/7) | Recovery |
 
 The implementation tasks are native sub-issues of the specification, with native blocking relationships. `ready-for-agent` means specified; it does not mean a blocked task may start. The spec issue is context, not an independently claimable implementation task.
 
@@ -22,11 +22,11 @@ The creator confirmed all 21 decisions and the consolidated implementation brief
 
 | Order | Issue | Depends on |
 | --- | --- | --- |
-| Spec | [#15 — Reusable B-roll library and adaptive indexing](https://github.com/angelobaricante/clipcon/issues/15) | Confirmed design; not independently claimable |
-| 1 | [#16 — Shared library sources and Segment roles](https://github.com/angelobaricante/clipcon/issues/16) | None; check active claims |
-| 2 | [#17 — Grounded emotional tone and reusable retrieval](https://github.com/angelobaricante/clipcon/issues/17) | #16 |
-| 3 | [#18 — Project creation, native drops, and recoverable queue](https://github.com/angelobaricante/clipcon/issues/18) | #17 |
-| 4 | [#19 — Measured resource-adaptive processing](https://github.com/angelobaricante/clipcon/issues/19) | #18 |
+| Spec | [#15 — Reusable B-roll library and adaptive indexing](https://github.com/angelobaricante/clipco/issues/15) | Confirmed design; not independently claimable |
+| 1 | [#16 — Shared library sources and Segment roles](https://github.com/angelobaricante/clipco/issues/16) | None; check active claims |
+| 2 | [#17 — Grounded emotional tone and reusable retrieval](https://github.com/angelobaricante/clipco/issues/17) | #16 |
+| 3 | [#18 — Project creation, native drops, and recoverable queue](https://github.com/angelobaricante/clipco/issues/18) | #17 |
+| 4 | [#19 — Measured resource-adaptive processing](https://github.com/angelobaricante/clipco/issues/19) | #18 |
 
 Tasks #16–19 are native sub-issues of #15, with native blocking dependencies in this order. All are specified with `ready-for-agent`; only #16 is initially unblocked. Do not reopen completed MVP tasks as a shortcut or claim the parent as implementation work.
 

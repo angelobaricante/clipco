@@ -132,7 +132,7 @@ final class AppModel {
         isCheckingReadiness = true
         defer { isCheckingReadiness = false }
         guard worker.isInstalled else {
-            readiness = Readiness(state: .workerUnavailable, detail: "The Clipcon worker is not set up.",
+            readiness = Readiness(state: .workerUnavailable, detail: "The Clipco worker is not set up.",
                                   guidance: worker.setupGuidance)
             return
         }
@@ -363,7 +363,7 @@ final class AppModel {
     /// Removal and deletion wait while footage is being imported, so an import never re-adds what was removed.
     var canDelete: Bool { activity == nil }
 
-    /// Forgets clips' saved context in Clipcon; the original video files stay where they are.
+    /// Forgets clips' saved context in Clipco; the original video files stay where they are.
     func remove(_ doomed: [SourceClip]) async {
         guard let project, canDelete, !doomed.isEmpty else { return }
         let ids = Set(doomed.map(\.id))

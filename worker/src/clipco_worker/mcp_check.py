@@ -1,4 +1,4 @@
-"""The app's Codex connection check: a real MCP session with clipcon-mcp, plus Codex registration state."""
+"""The app's Codex connection check: a real MCP session with clipco-mcp, plus Codex registration state."""
 
 import asyncio
 import json
@@ -18,7 +18,7 @@ BUNDLED_CODEX = Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/Cod
 
 
 def find_codex() -> Path | None:
-    if configured := os.environ.get("CLIPCON_CODEX"):
+    if configured := os.environ.get("CLIPCO_CODEX"):
         return Path(configured)
     if BUNDLED_CODEX.exists():
         return BUNDLED_CODEX
@@ -37,7 +37,7 @@ def codex_state(codex: Path | None) -> dict:
 
     try:
         state["version"] = run("--version").stdout.strip() or None
-        got = run("mcp", "get", "clipcon", "--json")
+        got = run("mcp", "get", "clipco", "--json")
         if got.returncode == 0:
             transport = json.loads(got.stdout).get("transport", {})
             state["registered"] = True
@@ -63,8 +63,8 @@ async def session(command: list[str]) -> dict:
 
 
 def connection_status(home: Path) -> dict:
-    command = [str(Path(sys.executable).parent / "clipcon-mcp"), "--home", str(home)]
-    status = {"server_command": command, "add_command": "codex mcp add clipcon -- " + shlex.join(command),
+    command = [str(Path(sys.executable).parent / "clipco-mcp"), "--home", str(home)]
+    status = {"server_command": command, "add_command": "codex mcp add clipco -- " + shlex.join(command),
               "sdk_version": version("mcp"), "codex": codex_state(find_codex())}
     try:
         status |= {"ok": True, "error": None, **asyncio.run(session(command))}

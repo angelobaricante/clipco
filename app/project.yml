@@ -1,4 +1,4 @@
-name: Clipcon
+name: Clipco
 options:
   bundleIdPrefix: com.angelobaricante
   deploymentTarget:
@@ -8,19 +8,19 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
 targets:
-  Clipcon:
+  Clipco:
     type: application
     platform: macOS
-    sources: [Clipcon]
+    sources: [Clipco]
     info:
-      path: Clipcon/Info.plist
+      path: Clipco/Info.plist
       properties:
-        CFBundleDisplayName: Clipcon
+        CFBundleDisplayName: Clipco
         LSApplicationCategoryType: public.app-category.video
         NSHumanReadableCopyright: ""
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.angelobaricante.clipcon
+        PRODUCT_BUNDLE_IDENTIFIER: com.angelobaricante.clipco
         GENERATE_INFOPLIST_FILE: YES
         ENABLE_HARDENED_RUNTIME: NO
         CODE_SIGN_IDENTITY: "-"

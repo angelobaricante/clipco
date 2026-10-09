@@ -5,8 +5,8 @@ from pathlib import Path
 from conftest import ScriptedSpeech, ScriptedVision, make_clip
 from test_mcp import call, payload
 
-from clipcon_worker.pipeline import Worker
-from clipcon_worker.speech import TranscriptSpan
+from clipco_worker.pipeline import Worker
+from clipco_worker.speech import TranscriptSpan
 
 A_ROLL = [
     TranscriptSpan(0.0, 4.0, "Today we build a gravity water filter from two buckets."),
@@ -106,7 +106,7 @@ def test_reimporting_unchanged_footage_reuses_context_without_inference_or_unrea
 
 def line_project(home: Path, tmp_path: Path) -> tuple[dict, Worker]:
     """The tutorial folder analysed with one Segment per spoken line, so related lines land in different Segments."""
-    from clipcon_worker.pipeline import RECIPE
+    from clipco_worker.pipeline import RECIPE
 
     folder = corpus(tmp_path / "shoot")
     worker = Worker(home, speech=ScriptedSpeech(A_ROLL), vision=ScriptedVision(B_ROLL),
@@ -206,7 +206,7 @@ def test_native_search_reads_the_saved_index_without_any_model_service(home, tmp
 
     project, _ = line_project(home, tmp_path)
     query = {"project_id": project["id"], "query": "two litres per minute"}
-    worker_cli = Path(sys.executable).parent / "clipcon-worker"
+    worker_cli = Path(sys.executable).parent / "clipco-worker"
 
     proc = subprocess.run(
         [str(worker_cli), "--home", str(home), "--whisper-model", str(tmp_path / "absent.bin"),
@@ -272,7 +272,7 @@ def test_footage_in_subfolders_joins_the_same_project(home, tmp_path):
 def test_an_unavailable_model_service_stops_the_import_and_says_so(home, tmp_path):
     import pytest
 
-    from clipcon_worker.vision import ServiceUnavailable
+    from clipco_worker.vision import ServiceUnavailable
 
     folder = corpus(tmp_path / "shoot")
     vision = ScriptedVision(B_ROLL)
@@ -348,7 +348,7 @@ def test_removing_a_clip_from_a_project_keeps_it_in_the_library_until_removed_fr
     [gone] = call(home, ("get_segment_context", {"segment_id": old_segment}))
     assert gone.is_error  # its Segments no longer exist
     assert original.exists() and sha256(original) == before
-    assert not (home / "frames" / broll["id"]).exists()  # Clipcon's own frame cache is cleaned up
+    assert not (home / "frames" / broll["id"]).exists()  # Clipco's own frame cache is cleaned up
 
 
 def test_deleting_a_project_leaves_other_projects_its_library_footage_and_all_originals(home, tmp_path):

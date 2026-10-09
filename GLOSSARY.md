@@ -1,4 +1,4 @@
-# Clipcon
+# Clipco
 
 Creators prepare knowledge about their raw footage so an editing agent can find and understand the material needed for a video.
 

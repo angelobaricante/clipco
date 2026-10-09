@@ -57,5 +57,5 @@ def warm_up(ollama, whisper_model: Path, vad_model: Path, which: Callable = shut
         ollama.warm_up()
     except InferenceError as e:
         return {**current, "state": "inference_failed", "detail": str(e),
-                "guidance": "Check ~/.clipcon/logs/ollama.log or restart Ollama, then retry."}
+                "guidance": "Check ~/.clipco/logs/ollama.log or restart Ollama, then retry."}
     return check(ollama, whisper_model, vad_model, which)

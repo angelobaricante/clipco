@@ -7,8 +7,8 @@ import pytest
 from conftest import SPANS, RecordedSpeech, RecordedVision, make_clip, sha256
 from test_creator_controls import WORKER
 
-from clipcon_worker.offline import StillOnline, offline_proof, probe_internet
-from clipcon_worker.pipeline import Worker
+from clipco_worker.offline import StillOnline, offline_proof, probe_internet
+from clipco_worker.pipeline import Worker
 
 UNREACHABLE = {"internet_reachable": False, "method": "fixture",
                "targets": [{"target": "1.1.1.1:443", "reachable": False, "error": "No route to host"}]}

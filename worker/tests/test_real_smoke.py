@@ -4,7 +4,7 @@ Requires whisper.cpp, the multilingual ggml large-v3-turbo model, and a running 
 qwen3.5:4b-q4_K_M. Run with: uv run pytest -m real -s
 The English clip is synthesised locally: macOS speech synthesis over a system desktop photo.
 macOS has no Tagalog voice, so the Tagalog check runs on a real clip you supply:
-  CLIPCON_TAGALOG_CLIP=/path/to/tagalog-or-taglish.mp4 uv run pytest -m real -s -k tagalog
+  CLIPCO_TAGALOG_CLIP=/path/to/tagalog-or-taglish.mp4 uv run pytest -m real -s -k tagalog
 """
 
 import json
@@ -43,7 +43,7 @@ def synth_clip(folder: Path) -> Path:
 
 
 def worker(home: Path, *args: str) -> list[dict]:
-    out = subprocess.run([sys.executable, "-m", "clipcon_worker.cli", "--home", str(home), *args],
+    out = subprocess.run([sys.executable, "-m", "clipco_worker.cli", "--home", str(home), *args],
                          capture_output=True, text=True)
     events = [json.loads(line) for line in out.stdout.splitlines()]
     assert events and events[-1]["event"] == "result", out.stderr + out.stdout
@@ -106,9 +106,9 @@ def test_real_speech_and_vision_context(tmp_path):
     print("\nSMOKE REPORT " + json.dumps(report, indent=2))
 
 
-@pytest.mark.skipif(not os.environ.get("CLIPCON_TAGALOG_CLIP"), reason="set CLIPCON_TAGALOG_CLIP to a real clip")
+@pytest.mark.skipif(not os.environ.get("CLIPCO_TAGALOG_CLIP"), reason="set CLIPCO_TAGALOG_CLIP to a real clip")
 def test_real_tagalog_speech_is_detected_and_transcribed(tmp_path):
-    clip = Path(os.environ["CLIPCON_TAGALOG_CLIP"]).expanduser()
+    clip = Path(os.environ["CLIPCO_TAGALOG_CLIP"]).expanduser()
     original = sha256(clip)
     home = tmp_path / "home"
     assert worker(home, "warmup")[-1]["readiness"]["state"] == "ready"

@@ -10,7 +10,7 @@ from test_creator_controls import worker_cli
 from test_mcp import call, payload
 from test_project import A_ROLL, B_ROLL
 
-from clipcon_worker.pipeline import Worker
+from clipco_worker.pipeline import Worker
 
 
 @pytest.fixture(scope="session")
@@ -82,7 +82,7 @@ def test_migrating_a_legacy_index_keeps_context_notes_exclusions_and_held_refere
 
     # Context analysed by the previous recipe stays current (not stale), and adding it to another Project
     # reuses it; only an explicit re-analysis upgrades it to per-Segment roles.
-    from clipcon_worker.pipeline import RECIPE
+    from clipco_worker.pipeline import RECIPE
     current = Worker(home, speech=speech, vision=vision, recipe={**RECIPE, "segment_target_seconds": 1.0})
     assert {c["status"] for c in current.check_sources(tutorial)["clips"]} == {"ready"}
     third = current.create_project("Third idea")["id"]
@@ -100,7 +100,7 @@ def shoot(tmp_path):
     """The tutorial shoot analysed into one Project, plus a second Project for another idea."""
     from test_project import line_project
 
-    project, worker = line_project(home := tmp_path / "clipcon-home", tmp_path)
+    project, worker = line_project(home := tmp_path / "clipco-home", tmp_path)
     ideas = worker.create_project("Kitchen ideas")
     return home, worker, project["id"], ideas["id"]
 
@@ -215,7 +215,7 @@ class FacingWhileTalking(ScriptedVision):
 def test_segments_of_a_mixed_recording_get_their_own_roles_and_creator_corrections(home, tmp_path):
     from conftest import RecordedSpeech, make_clip
 
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.speech import TranscriptSpan
 
     talk = [TranscriptSpan(0.0, 7.5, "Here is how the filter goes together on the counter."),
             TranscriptSpan(20.5, 28.0, "As you can see, the water comes out clear.")]  # said over other visuals
@@ -258,7 +258,7 @@ def test_segments_of_a_mixed_recording_get_their_own_roles_and_creator_correctio
     assert clip_id == clip["id"]
 
     # A re-analysis that draws different Segment boundaries cannot silently drop the creator's decision.
-    from clipcon_worker.pipeline import RECIPE
+    from clipco_worker.pipeline import RECIPE
     regrouped = Worker(home, speech=worker.speech, vision=worker.vision,
                        recipe={**RECIPE, "silent_gap_seconds": 1000.0})
     regrouped.retry(project, [clip_id])
@@ -324,7 +324,7 @@ def test_a_transcript_line_stretched_over_a_measured_silence_does_not_hide_the_c
 
     from conftest import RecordedSpeech
 
-    from clipcon_worker.speech import TranscriptSpan
+    from clipco_worker.speech import TranscriptSpan
 
     clip = tmp_path / "talk-then-cutaway.mp4"  # a tone, silent from 8 s to 22 s
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=30",

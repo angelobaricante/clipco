@@ -1,16 +1,16 @@
 [project]
-name = "clipcon-worker"
+name = "clipco-worker"
 version = "0.1.0"
-description = "Clipcon local indexing worker: FFmpeg, whisper.cpp, Ollama, SQLite."
+description = "Clipco local indexing worker: FFmpeg, whisper.cpp, Ollama, SQLite."
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.20",
 ]
 
 [project.scripts]
-clipcon-worker = "clipcon_worker.cli:main"
-clipcon-mcp = "clipcon_worker.mcp_server:main"
-clipcon-benchmark = "clipcon_worker.benchmark:main"
+clipco-worker = "clipco_worker.cli:main"
+clipco-mcp = "clipco_worker.mcp_server:main"
+clipco-benchmark = "clipco_worker.benchmark:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

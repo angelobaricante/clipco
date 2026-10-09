@@ -1,4 +1,4 @@
-"""JSON-lines command interface used by the Clipcon app.
+"""JSON-lines command interface used by the Clipco app.
 
 Every stdout line is one JSON event: {"event": "progress"|"readiness"|"result"|"error", ...}.
 Diagnostics go to stderr.
@@ -18,8 +18,8 @@ from .retrieval import SEARCH_PAGE, Index, default_home
 from .speech import WhisperCppSpeech
 from .vision import OllamaVision
 
-DEFAULT_WHISPER = Path.home() / ".clipcon" / "models" / "ggml-large-v3-turbo.bin"  # multilingual
-DEFAULT_VAD = Path.home() / ".clipcon" / "models" / "ggml-silero-v5.1.2.bin"  # voice activity detection
+DEFAULT_WHISPER = Path.home() / ".clipco" / "models" / "ggml-large-v3-turbo.bin"  # multilingual
+DEFAULT_VAD = Path.home() / ".clipco" / "models" / "ggml-silero-v5.1.2.bin"  # voice activity detection
 DEFAULT_VISION = "qwen3.5:4b-q4_K_M"
 
 
@@ -29,15 +29,15 @@ def emit(event: str, **payload) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="clipcon-worker")
+    parser = argparse.ArgumentParser(prog="clipco-worker")
     parser.add_argument("--home", type=Path, default=default_home())
     parser.add_argument("--whisper-model", type=Path,
-                        default=Path(os.environ.get("CLIPCON_WHISPER_MODEL", DEFAULT_WHISPER)))
+                        default=Path(os.environ.get("CLIPCO_WHISPER_MODEL", DEFAULT_WHISPER)))
     parser.add_argument("--vad-model", type=Path,
-                        default=Path(os.environ.get("CLIPCON_VAD_MODEL", DEFAULT_VAD)))
-    parser.add_argument("--speech-language", default=os.environ.get("CLIPCON_SPEECH_LANGUAGE", "auto"),
+                        default=Path(os.environ.get("CLIPCO_VAD_MODEL", DEFAULT_VAD)))
+    parser.add_argument("--speech-language", default=os.environ.get("CLIPCO_SPEECH_LANGUAGE", "auto"),
                         help='whisper language code, e.g. "en" or "tl"; "auto" detects it per clip')
-    parser.add_argument("--vision-model", default=os.environ.get("CLIPCON_VISION_MODEL", DEFAULT_VISION))
+    parser.add_argument("--vision-model", default=os.environ.get("CLIPCO_VISION_MODEL", DEFAULT_VISION))
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("readiness")
     sub.add_parser("warmup")
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                        help="with networking off: index one new clip live, search it, and save an evidence report")
     p.add_argument("--project", required=True)
     p.add_argument("--query", action="append", default=[], help="search to run afterwards (repeatable)")
-    p.add_argument("--report-dir", type=Path, default=Path.home() / ".clipcon" / "evidence")
+    p.add_argument("--report-dir", type=Path, default=Path.home() / ".clipco" / "evidence")
     p.add_argument("source", type=Path)
     p = sub.add_parser("snapshot")
     destination(p)
@@ -190,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
                               progress=lambda stage, detail: emit("progress", stage=stage, **detail))
                 emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))
     except Exception as e:  # reported to the app as a structured, displayable error
-        print(f"clipcon-worker: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"clipco-worker: {type(e).__name__}: {e}", file=sys.stderr)
         emit("error", kind=type(e).__name__, message=str(e))
         return 1
     return 0

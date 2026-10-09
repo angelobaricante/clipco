@@ -1,6 +1,6 @@
 # Reusable footage and import improvements
 
-Status: all 21 decisions and the consolidated implementation brief confirmed by the creator on 2026-10-10 (Asia/Manila). Published through the requested to-spec workflow as [specification #15](https://github.com/angelobaricante/clipcon/issues/15), with implementation tasks #16–19. No application behavior has changed. This extends the completed MVP without rewriting its historical specification or evidence.
+Status: all 21 decisions and the consolidated implementation brief confirmed by the creator on 2026-10-10 (Asia/Manila). Published through the requested to-spec workflow as [specification #15](https://github.com/angelobaricante/clipco/issues/15), with implementation tasks #16–19. No application behavior has changed. This extends the completed MVP without rewriting its historical specification or evidence.
 
 ## Requested direction
 
@@ -16,7 +16,7 @@ The creator wants B-roll retrieval to consider useful footage outside the curren
 - Import supports multiple files/folders through a file picker, without drag-and-drop handling. Batch indexing runs sequentially; progress tracks one active clip.
 - The worker owns atomic SQLite publication. Its current database connection cannot simply be shared across background threads. Parallel processing needs coordinated writes and job ownership.
 
-Relevant code: `worker/src/clipcon_worker/{retrieval,store,pipeline,vision,relationships}.py`, `app/Clipcon/{Sheets,AppModel,WorkerClient}.swift`.
+Relevant code: `worker/src/clipco_worker/{retrieval,store,pipeline,vision,relationships}.py`, `app/Clipco/{Sheets,AppModel,WorkerClient}.swift`.
 
 ## Accepted first-round decisions
 
