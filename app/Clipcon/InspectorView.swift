@@ -51,11 +51,14 @@ struct InspectorView: View {
 final class PreviewPlayer {
     let player = AVPlayer()
     private(set) var clipID: SourceClip.ID?
+    private var revision: Int?
     private(set) var access: SourceAccess?
 
+    /// Checks the original again whenever the clip or its analysed revision changes.
     func show(_ clip: SourceClip) async {
-        guard clip.id != clipID || access == nil else { return }
+        guard clip.id != clipID || clip.revision != revision || access == nil else { return }
         clipID = clip.id
+        revision = clip.revision
         access = nil
         player.pause()
         let checked = await SourceAccess.check(clip)

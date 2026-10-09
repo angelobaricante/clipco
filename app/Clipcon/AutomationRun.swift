@@ -65,6 +65,16 @@ enum AutomationRun {
         model.browserMode = defaults.string(forKey: "ClipconAutomationMode") == "list" ? .list : .grid
         model.inspectorTab = InspectorTab(rawValue: (defaults.string(forKey: "ClipconAutomationTab") ?? "context")
             .capitalized) ?? .context
+        var commandF: [String] = []
+        for top in NSApp.mainMenu?.items ?? [] {
+            for item in top.submenu?.items ?? [] {
+                for candidate in [item] + (item.submenu?.items ?? [])
+                where candidate.keyEquivalent == "f" && candidate.keyEquivalentModifierMask == .command {
+                    commandF.append("\(top.title) ▸ \(candidate.title)")
+                }
+            }
+        }
+        report["command_f_items"] = commandF
         report["window_number"] = NSApp.windows.first { $0.isVisible }?.windowNumber ?? NSNull()
         report["error"] = model.errorMessage ?? NSNull()
         write(report, to: out)

@@ -180,6 +180,12 @@ final class AppModel {
         do {
             try await worker.setExcluded(projectID: project.id, clipIDs: targets.map(\.id), excluded: excluded)
             try await reload()
+            // Under the Excluded filter, an included clip leaves the browser, so it leaves the selection too.
+            let shown = Set(visibleClips.map(\.id))
+            if !selection.isSubset(of: shown) {
+                selection.formIntersection(shown)
+                if selection.isEmpty { select(visibleClips.first?.id) }
+            }
             if !trimmedQuery.isEmpty { await search() }
         } catch {
             errorMessage = "Could not \(excluded ? "exclude" : "include") the clip: \(error.localizedDescription)"

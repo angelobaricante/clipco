@@ -119,3 +119,30 @@ def test_the_apps_snapshot_shows_notes_exclusions_and_suggested_relationships_fo
                    and r["clip_id"] == clips["broll-1-pour.mp4"]["id"]]
     assert to_excluded and all(r["excluded"] is True and r["suggested"] is True for r in to_excluded)
     assert all(r["excluded"] is False for r in related if r["clip_id"] == a_roll["id"])
+
+
+def test_notes_and_exclusions_can_be_saved_while_other_footage_is_being_analysed(home, tmp_path):
+    from conftest import ScriptedSpeech, ScriptedVision
+    from test_project import A_ROLL, B_ROLL, corpus
+
+    from clipcon_worker.pipeline import Worker
+
+    folder = corpus(tmp_path / "shoot")
+    vision = ScriptedVision(B_ROLL)
+    worker = Worker(home, speech=ScriptedSpeech(A_ROLL), vision=vision)
+    project = worker.create_project("Gravity filter tutorial")
+    during = {}
+
+    def edit_while_describing(request):  # the indexer is mid-import in this process
+        if request.original_filename == "broll-2-drip.mp4" and not during:
+            pour = clips_by_name(worker, project["id"])["broll-1-pour.mp4"]
+            during["note"] = worker_cli(home, "set-note", "--clip", pour["id"], "--text", "Use the slow pour.")
+            during["excluded"] = worker_cli(home, "set-excluded", "--project", project["id"], "--excluded", "yes",
+                                            pour["id"])
+    vision.on_describe = edit_while_describing
+
+    worker.import_folder(project["id"], folder)
+
+    assert during["note"]["note"]["text"] == "Use the slow pour." and during["excluded"]["excluded"] is True
+    pour = clips_by_name(worker, project["id"])["broll-1-pour.mp4"]
+    assert pour["status"] == "ready" and pour["excluded"] is True and pour["note"]["text"] == "Use the slow pour."
