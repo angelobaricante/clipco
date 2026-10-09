@@ -238,6 +238,34 @@ struct SegmentTone: Decodable, Hashable, Sendable {
     }
 }
 
+enum EditingAgent: String, Identifiable {
+    case codex = "Codex", claude = "Claude"
+    var id: Self { self }
+}
+
+struct AgentRegistration: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var name: String
+    var installed: Bool
+    var configured: Bool
+    var state: String
+    var error: String?
+    var configPath: String?
+    var setupCommand: String?
+    var setupJson: String?
+    var guidance: String
+
+    var title: String {
+        switch state {
+        case "configured": "Configured"
+        case "not_installed": "Not installed"
+        case "conflict": "Needs attention"
+        case "error": "Couldn’t check setup"
+        default: "Not configured"
+        }
+    }
+}
+
 /// Result of the app's Codex connection check: a real MCP session with clipco-mcp.
 struct McpStatus: Decodable, Equatable, Sendable {
     struct Codex: Decodable, Equatable, Sendable {
@@ -260,6 +288,7 @@ struct McpStatus: Decodable, Equatable, Sendable {
     var connectMs: Int?
     var overviewMs: Int?
     var codex: Codex
+    var agents: [AgentRegistration]?
 
     /// Codex has a `clipco` server, but it launches something other than this installation.
     var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }

@@ -17,6 +17,7 @@
 		C5CDAF329A75099DB0DB7E15 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ACBD51B72CCCAEF2D8BCB4C /* AppModel.swift */; };
 		D12F602E69068986F6EDF0DD /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E271739FEEA55898A9654 /* InspectorView.swift */; };
 		FE619D4000027A6C4BAD9A35 /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D80F7DE7303E42FF79ED953 /* BrowserView.swift */; };
+		EA47B117FA9C4B7AA021CD01 /* AgentLogos.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EA47B117FA9C4B7AA021CD02 /* AgentLogos.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		C33BB3BC6BB398E55B36AD96 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CCBB5B1169767DC42BFFFC69 /* AutomationRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationRun.swift; sourceTree = "<group>"; };
 		FD0594D59D5B431A0AD13B22 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
+		EA47B117FA9C4B7AA021CD02 /* AgentLogos.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AgentLogos.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -54,6 +56,7 @@
 		E56CE66122D2F0EBF35DFDDB /* Clipco */ = {
 			isa = PBXGroup;
 			children = (
+				EA47B117FA9C4B7AA021CD02 /* AgentLogos.xcassets */,
 				0ACBD51B72CCCAEF2D8BCB4C /* AppModel.swift */,
 				CCBB5B1169767DC42BFFFC69 /* AutomationRun.swift */,
 				2D80F7DE7303E42FF79ED953 /* BrowserView.swift */,
@@ -76,6 +79,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7D15051319857B2A249768D1 /* Build configuration list for PBXNativeTarget "Clipco" */;
 			buildPhases = (
+				EA47B117FA9C4B7AA021CD03 /* Agent Logos Resources */,
 				C1D557F7361E0B9D42CC6D97 /* Sources */,
 			);
 			buildRules = (
@@ -118,6 +122,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+        EA47B117FA9C4B7AA021CD03 /* Agent Logos Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                EA47B117FA9C4B7AA021CD01 /* AgentLogos.xcassets in Resources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		C1D557F7361E0B9D42CC6D97 /* Sources */ = {

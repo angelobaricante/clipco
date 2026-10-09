@@ -13,14 +13,14 @@ struct InspectorView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            Picker("Inspector section", selection: $model.inspectorTab) {
-                ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(12)
-            Divider()
             if let clip = model.selectedClip {
+                Picker("Inspector section", selection: $model.inspectorTab) {
+                    ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(12)
+                Divider()
                 let spoken = model.spokenLineID(in: clip)
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -69,13 +69,34 @@ struct InspectorView: View {
                 }
                 .id(clip.id)
             } else if model.selection.count > 1 {
-                ContentUnavailableView("\(model.selection.count) Clips Selected", systemImage: "square.stack",
-                                       description: Text("Select one clip to inspect its context."))
+                InspectorPlaceholder(title: "\(model.selection.count) Clips Selected",
+                                     symbol: "square.stack",
+                                     detail: "Select one clip to see its details.")
             } else {
-                ContentUnavailableView("No Selection", systemImage: "sidebar.trailing",
-                                       description: Text("Select a clip to inspect its context."))
+                InspectorPlaceholder(title: "No Selection", symbol: "film",
+                                     detail: "Select a clip to see its context, transcript, and file details.")
             }
         }
+    }
+}
+
+/// An inspector-sized empty state. Tabs only appear when there is something to inspect.
+private struct InspectorPlaceholder: View {
+    let title: String
+    let symbol: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 28)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Text(title).font(.headline).foregroundStyle(.secondary)
+            Text(detail).font(.callout).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).frame(maxWidth: 240)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -1,3 +1,4 @@
+import AppKit
 import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
@@ -92,6 +93,7 @@ struct ContentView: View {
             NewProjectSheet(footage: model.newProjectFootage)
         }
         .sheet(isPresented: $model.showSetup) { SetupSheet() }
+        .sheet(item: $model.agentConnection) { AgentConnectionSheet(agent: $0) }
     }
 }
 
@@ -162,9 +164,8 @@ struct ProjectDialogs: ViewModifier {
     }
 }
 
-/// A sidebar row: a footage filter of the open Project, or another Project to open.
+/// Sidebar destinations: Projects and the reusable Footage library.
 enum SidebarItem: Hashable {
-    case filter(FootageFilter)
     case project(Project.ID)
     case library
 }
@@ -175,45 +176,23 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
         List(selection: Binding<SidebarItem?>(
-            get: { model.showingLibrary ? .library : .filter(model.filter) },
+            get: {
+                if model.showingLibrary { return .library }
+                return model.project.map { .project($0.id) }
+            },
             set: { item in
                 switch item {
                 case .library: Task { await model.openLibrary() }
-                case .filter(let filter):
-                    if model.showingLibrary, let project = model.project {
-                        Task {
-                            do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
-                            model.filter = filter
-                        }
-                    } else {
-                        model.filter = filter
-                    }
                 case .project(let id):
                     guard let project = model.projects.first(where: { $0.id == id }) else { return }
                     Task {
+                        model.filter = .all
                         do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
                     }
                 case nil: break
                 }
             })
         ) {
-            if !model.showingLibrary {
-            Section(model.project?.name ?? "No Project") {
-                ForEach([FootageFilter.all, .aRoll, .bRoll]) { filter in
-                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
-                }
-            }
-            Section("Review") {
-                ForEach([FootageFilter.needsReview, .excluded]) { filter in
-                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
-                }
-            }
-            }
-            Section("Footage Library") {
-                Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
-                    .tag(SidebarItem.library)
-                    .help("B-roll you allow to be reused, from every Project and library-only footage")
-            }
             Section("Projects") {
                 Button("New Project…", systemImage: "plus") { model.showNewProject = true }
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
@@ -234,12 +213,21 @@ struct SidebarView: View {
                     }
                 }
             }
+            Section("Footage Library") {
+                Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
+                    .tag(SidebarItem.library)
+                    .help("B-roll you allow to be reused, from every Project and library-only footage")
+            }
+            Section("AI Agents") {
+                AgentConnectionRow(agent: .codex)
+                AgentConnectionRow(agent: .claude)
+            }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
                 QueueSummary()
                 ReadinessBadge()
-                Button("Setup & Connect Codex…", systemImage: "gearshape") { model.showSetup = true }
+                Button("Local Setup…", systemImage: "gearshape") { model.showSetup = true }
                     .buttonStyle(.borderless).font(.caption)
             }
             .padding(12)
@@ -247,16 +235,180 @@ struct SidebarView: View {
     }
 }
 
-struct FilterRow: View {
-    let filter: FootageFilter
-    /// Nil while the library is shown, whose clips are not this Project's.
-    let count: Int?
+/// Visible connection entry points; configured means saved locally, not an active agent session.
+struct AgentLogo: View {
+    let agent: EditingAgent
+    let size: CGFloat
 
     var body: some View {
-        Label(filter.rawValue, systemImage: filter.symbol)
-            .badge(count ?? 0)
-            .tag(SidebarItem.filter(filter))
-            .accessibilityLabel(count.map { "\(filter.rawValue), \($0) \($0 == 1 ? "clip" : "clips")" } ?? filter.rawValue)
+        Image(agent == .codex ? "CodexAgent" : "ClaudeAgent")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+struct AgentConnectionRow: View {
+    @Environment(AppModel.self) private var model
+    let agent: EditingAgent
+
+    var body: some View {
+        Button { model.agentConnection = agent } label: {
+            HStack(spacing: 8) {
+                AgentLogo(agent: agent, size: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agent.rawValue)
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(agent.rawValue), \(summary), connection settings")
+        .help("Connect Clipco’s saved footage context to \(agent.rawValue)")
+        .task { if model.mcpStatus == nil { await model.checkMcp() } }
+    }
+
+    private var summary: String {
+        guard let registrations = model.mcpStatus?.agents else {
+            return model.isCheckingMcp ? "Checking…" : model.agentConnectionError == nil
+                ? "Set up connection" : "Setup unavailable"
+        }
+        if agent == .codex {
+            return registrations.first { $0.id == "codex" }?.title ?? "Set up connection"
+        }
+        let configured = registrations.filter { $0.id.hasPrefix("claude-") && $0.configured }.count
+        if configured == 2 { return "Both apps configured" }
+        if let connected = registrations.first(where: { $0.id.hasPrefix("claude-") && $0.configured }) {
+            return connected.id == "claude-code" ? "Code configured" : "Desktop configured"
+        }
+        return "Set up connection"
+    }
+}
+
+struct AgentConnectionSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let agent: EditingAgent
+    @State private var claudeClient = "claude-desktop"
+    @State private var confirmingDisconnect = false
+
+    private var clientID: String { agent == .codex ? "codex" : claudeClient }
+    private var registration: AgentRegistration? { model.mcpStatus?.agents?.first { $0.id == clientID } }
+    private var busy: Bool { model.isCheckingMcp || model.connectingClient != nil }
+    private var restartGuidance: String {
+        clientID == "claude-desktop" ? "Quit and reopen Claude Desktop to apply changes."
+            : "Start a new agent session to apply changes."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                AgentLogo(agent: agent, size: 36)
+                Text("\(agent.rawValue) Connection").font(.title2.weight(.semibold))
+            }
+            Text("Let your agent find footage, read its context, and locate the original clips.")
+                .foregroundStyle(.secondary)
+            if agent == .claude {
+                Picker("Claude app", selection: $claudeClient) {
+                    Text("Claude Desktop").tag("claude-desktop")
+                    Text("Claude Code").tag("claude-code")
+                }
+                .pickerStyle(.segmented).disabled(busy)
+            }
+            if let registration {
+                Label(registration.title,
+                      systemImage: registration.configured ? "checkmark.circle" : "link")
+                    .foregroundStyle(registration.configured ? Color.green : Color.secondary)
+                if registration.state == "conflict" {
+                    Text("This app has a different or disabled Clipco connection. Disconnect it here, then connect again to use this Clipco workspace.")
+                        .font(.callout)
+                }
+                if !registration.installed {
+                    Text("Install \(registration.name), then check setup again.").font(.callout)
+                }
+                if let error = registration.error { Text(error).font(.callout).foregroundStyle(.orange) }
+                if registration.configured { Text(registration.guidance).font(.callout) }
+                Text("Disconnect removes Clipco’s saved registration. \(restartGuidance)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if let status = model.mcpStatus {
+                Label(status.ok ? "Footage tools ready" : "Footage tools unavailable",
+                      systemImage: status.ok ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.secondary)
+                if let error = status.error { Text(error).font(.caption).textSelection(.enabled) }
+            }
+            if let error = model.agentConnectionError {
+                Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
+            Text("Connecting gives your agent access to saved footage context. Context it retrieves may be sent to its AI provider. Clipco’s analysis stays local.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let registration {
+                DisclosureGroup("Manual setup") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let path = registration.configPath {
+                            Text(path).font(.caption.monospaced()).textSelection(.enabled)
+                        }
+                        if let command = registration.setupCommand {
+                            Text(command).font(.caption.monospaced()).textSelection(.enabled)
+                            Button("Copy Command") { copy(command) }
+                        } else if let json = registration.setupJson {
+                            Text("Merge the Clipco entry into your app’s configuration, then quit and reopen the app.")
+                                .font(.caption)
+                            Text(json).font(.caption.monospaced()).textSelection(.enabled)
+                            Button("Copy Configuration") { copy(json) }
+                        }
+                    }.padding(.top, 6)
+                }
+            }
+            Divider()
+            HStack {
+                Button("Check Setup") { Task { await model.checkMcp() } }.disabled(busy)
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                if registration?.configured == true || registration?.state == "conflict" {
+                    Button(registration?.configured == true ? "Disconnect" : "Disconnect Existing Connection", role: .destructive) {
+                        if registration?.state == "conflict" {
+                            confirmingDisconnect = true
+                        } else {
+                            Task { await model.connectAgent(clientID, disconnect: true) }
+                        }
+                    }
+                    .disabled(busy)
+                } else {
+                    Button("Connect \(registration?.name ?? agent.rawValue)") {
+                        Task { await model.connectAgent(clientID) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || registration?.installed != true || registration?.error != nil
+                              || model.mcpStatus?.ok != true)
+                }
+            }
+        }
+        .padding(24).frame(width: 520)
+        .interactiveDismissDisabled(busy)
+        .alert("Disconnect the existing Clipco connection?", isPresented: $confirmingDisconnect) {
+            Button("Disconnect", role: .destructive) {
+                Task { await model.connectAgent(clientID, disconnect: true) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes only the Clipco registration from \(registration?.name ?? agent.rawValue). You can then connect this workspace. \(restartGuidance)")
+        }
+        .task {
+            model.agentConnectionError = nil
+            await model.checkMcp()
+        }
+        .onChange(of: claudeClient) { model.agentConnectionError = nil }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
