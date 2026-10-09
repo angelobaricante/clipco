@@ -1,0 +1,16 @@
+{
+  "checks": {
+    "clear_search_resets_loading": true,
+    "corrected_segment_in_broll_filter": true,
+    "hidden_selection_cleared": true,
+    "no_errors": true,
+    "note_saved_to_captured_project": true,
+    "playback_starts_at_matching_segment": true,
+    "search_continuation_no_duplicates": true,
+    "search_play_action_available": true,
+    "unresolved_role_is_reviewable": true
+  },
+  "observed_position": 8.400028292,
+  "passed": true,
+  "playback_start": 7.9
+}

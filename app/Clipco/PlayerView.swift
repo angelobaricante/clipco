@@ -103,6 +103,12 @@ struct PlayerOverlay: View {
                         Label(state.title, systemImage: "film.slash")
                     } description: {
                         Text(state.detail)
+                    } actions: {
+                        Button("Review Source") {
+                            model.showInspector = true
+                            model.inspectorTab = .context
+                            model.closePlayer()
+                        }
                     }
                 }
             }
