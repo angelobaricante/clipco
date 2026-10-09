@@ -36,10 +36,15 @@ MAX_CONTEXT_TOKENS = 64
 
 
 class WhisperCppSpeech:
-    def __init__(self, model_path: Path, binary: str = "whisper-cli", language: str = "auto",
+    def __init__(self, model_path: Path, vad_model_path: Path, binary: str = "whisper-cli", language: str = "auto",
                  prompt: str = INITIAL_PROMPT):
-        """language: a whisper language code ("en", "tl") or "auto" to detect it per clip."""
+        """language: a whisper language code ("en", "tl") or "auto" to detect it per clip.
+
+        vad_model_path: Silero voice-activity model. Only audio it detects as voice is transcribed; without it,
+        whisper invents speech for room tone (e.g. "Konec." over silent B-roll).
+        """
         self.model_path = Path(model_path)
+        self.vad_model_path = Path(vad_model_path)
         self.binary = binary
         self.language = language
         self.prompt = prompt
@@ -48,17 +53,20 @@ class WhisperCppSpeech:
     def identity(self) -> dict:
         return {"engine": "whisper.cpp", "model": self.model_path.name,
                 "model_bytes": self.model_path.stat().st_size if self.model_path.exists() else None,
-                "language": self.language, "prompt": self.prompt, "max_context": MAX_CONTEXT_TOKENS}
+                "language": self.language, "prompt": self.prompt, "max_context": MAX_CONTEXT_TOKENS,
+                "vad_model": self.vad_model_path.name}
 
     def transcribe(self, wav_path: Path) -> Transcript:
-        if not self.model_path.exists():
-            raise SpeechError(f"whisper model missing: {self.model_path}")
+        for path in (self.model_path, self.vad_model_path):
+            if not path.exists():
+                raise SpeechError(f"speech model missing: {path}")
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp) / "transcript"
             try:
                 subprocess.run(
                     [self.binary, "-m", str(self.model_path), "-f", str(wav_path), "-l", self.language,
-                     "--prompt", self.prompt, "-mc", str(MAX_CONTEXT_TOKENS), "-oj", "-of", str(base), "-np"],
+                     "--prompt", self.prompt, "-mc", str(MAX_CONTEXT_TOKENS), "-oj", "-of", str(base), "-np",
+                     "--vad", "-vm", str(self.vad_model_path)],
                     check=True, capture_output=True, text=True,
                 )
             except FileNotFoundError as e:

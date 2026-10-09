@@ -291,3 +291,24 @@ def test_an_unavailable_model_service_stops_the_import_and_says_so(home, tmp_pat
         call(home, ("get_project_overview", {"project_id": project["id"]}))[0])["clips"]}
     assert states == {"a-roll.mp4": "ready", "broll-1-pour.mp4": "ready", "broll-2-drip.mp4": "failed",
                       "broll-3-cartridge.mp4": "pending"}
+
+
+def test_a_roll_is_someone_speaking_to_camera_for_most_of_the_clip(home, tmp_path):
+    folder = tmp_path / "shoot"
+    folder.mkdir()
+    for name in ("to-camera.mp4", "voice-over-screen.mp4"):
+        make_clip(folder / name, seconds=23.0)
+    make_clip(folder / "silent-broll.mp4", seconds=6.0)  # has an audio track, but nobody speaks
+    speech = ScriptedSpeech([], A_ROLL, A_ROLL)  # import order: silent-broll, to-camera, voice-over-screen
+    vision = ScriptedVision({}, facing_camera={"to-camera.mp4"})
+    worker = Worker(home, speech=speech, vision=vision)
+    project = worker.create_project("Roles")
+
+    worker.import_folder(project["id"], folder)
+
+    clips = {c["original_filename"]: c for c in worker.snapshot(project["id"])["clips"]}
+    assert clips["to-camera.mp4"]["role"] == "a-roll"
+    assert clips["voice-over-screen.mp4"]["role"] == "b-roll"  # speech alone, nobody addressing the camera
+    assert clips["silent-broll.mp4"]["role"] == "b-roll"
+    basis = clips["to-camera.mp4"]["role_basis"]
+    assert "speech covers" in basis and "facing the camera" in basis

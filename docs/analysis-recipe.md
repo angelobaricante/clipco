@@ -10,7 +10,7 @@ Clipcon reuses saved footage context when a Source clip and the analysis configu
 | --- | --- | --- |
 | `source` | SHA-256 of the file's bytes | `pipeline.fingerprint` |
 | `recipe` | `pipeline.RECIPE` (version, segment target, frames per segment, frame cap, frame width) | code |
-| `speech` | whisper.cpp model filename and byte size, language setting, prompt, context limit | `WhisperCppSpeech.identity` |
+| `speech` | whisper.cpp model filename and byte size, language setting, prompt, context limit, VAD model | `WhisperCppSpeech.identity` |
 | `vision` | Ollama model tag and installed digest | `OllamaVision.identity` |
 
 A ready clip whose size and modification time match the indexed values keeps its saved fingerprint instead of being rehashed. `resolve_media` uses the same check to detect changed media. The clip stays `ready` throughout the check. If any input differs, the clip keeps its identity (`clip_id`) and is re-analysed into a new revision. The new revision publishes atomically, replacing the old Segments in one transaction.
@@ -19,8 +19,9 @@ Relationships (Spoken correction, Repeated take, suggested supporting B-roll) ar
 
 ## Current recipe
 
-- `RECIPE` version 4: about 30 s Segments with boundaries between transcript lines; 10 s Segments for clips without speech; 2 sampled frames per Segment (1 when a clip would exceed 24 frames); frames 512 px wide.
-- Speech: whisper.cpp `ggml-large-v3-turbo.bin`, language auto-detected per clip.
+- `RECIPE` version 5: about 30 s Segments with boundaries between transcript lines; 10 s Segments for clips without speech; 2 sampled frames per Segment (1 when a clip would exceed 24 frames); frames 512 px wide.
+- Speech: whisper.cpp `ggml-large-v3-turbo.bin`, language auto-detected per clip. Only audio that Silero VAD (`ggml-silero-v5.1.2.bin`, sha256 `29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf`) detects as voice is transcribed. Without VAD, whisper invented "Konec." and "I don't know how much it is…" over the creator's silent B-roll.
+- Role: a clip is suggested as A-roll when speech covers at least half its duration **and** the vision model reports a person facing the camera, addressing the viewer, in at least half of its speaking Segments. Otherwise it is B-roll. The clip's `role_basis` records both measurements.
 - Vision: Ollama `qwen3.5:4b-q4_K_M`, digest `d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04` (Ollama 0.40.2).
 
 The recipe that passes the three discovery queries on the agreed tutorial corpus will be recorded here once that corpus is indexed (#4).

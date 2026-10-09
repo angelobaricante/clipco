@@ -16,7 +16,7 @@ from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailabl
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
-    "version": 4,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard
+    "version": 5,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role
     "segment_target_seconds": 30.0,
     "silent_segment_seconds": 10.0,
     "frames_per_segment": 2,
@@ -25,6 +25,9 @@ RECIPE = {
 }
 
 Progress = Callable[[str, dict], None]
+
+# Share of a clip's duration that must be speech before it can count as A-roll ("talking most of the time").
+A_ROLL_SPEECH_SHARE = 0.5
 
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts"})
 
@@ -230,6 +233,7 @@ class Worker:
             if len(planned) * per_segment > recipe["max_frames"]:
                 per_segment = 1
             segments = []
+            facing = 0  # speaking Segments whose frames show a person addressing the camera
             for ordinal, (start, end, group) in enumerate(planned):
                 stage("sampling_frames", segment=ordinal + 1, of=len(planned))
                 frames = []
@@ -250,6 +254,7 @@ class Worker:
                 )
                 stage("describing", segment=ordinal + 1, of=len(planned))
                 desc = self._describe(request)
+                facing += bool(group) and desc.speaker_facing_camera
                 segments.append({
                     "id": new_id("seg"), "ordinal": ordinal, "start": start, "end": end, "label": desc.label,
                     "transcript": transcript, "frames": frames,
@@ -261,8 +266,11 @@ class Worker:
         except BaseException:
             shutil.rmtree(frames_dir, ignore_errors=True)
             raise
+        # A-roll: someone speaks for most of the clip and, in at least half of the speaking Segments, is seen
+        # facing the camera. Speech alone (a voice-over) or a person alone (silent B-roll) is not A-roll.
         speech_seconds = sum(s.end - s.start for s in spans)
-        is_a_roll = speech_seconds >= 0.4 * info.duration
+        speaking = sum(1 for _, _, group in planned if group)
+        is_a_roll = speech_seconds >= A_ROLL_SPEECH_SHARE * info.duration and speaking and facing >= speaking / 2
         return {
             "clip": {
                 "duration": info.duration, "width": info.width, "height": info.height, "fps": info.fps,
@@ -270,7 +278,8 @@ class Worker:
                 "label": segments[0]["label"],
                 "speech_language": language,
                 "role": "a-roll" if is_a_roll else "b-roll",
-                "role_basis": f"speech covers {speech_seconds / info.duration:.0%} of the clip",
+                "role_basis": f"speech covers {speech_seconds / info.duration:.0%} of the clip; a person is "
+                              f"facing the camera in {facing} of {speaking} speaking segments",
             },
             "segments": segments,
         }

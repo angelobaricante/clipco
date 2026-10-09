@@ -16,6 +16,7 @@ BUILD="$STATE/build"
 OLLAMA_ADDR="127.0.0.1:11434"
 VISION_MODEL="${CLIPCON_VISION_MODEL:-qwen3.5:4b-q4_K_M}"
 WHISPER_MODEL="${CLIPCON_WHISPER_MODEL:-$STATE/models/ggml-large-v3-turbo.bin}"
+VAD_MODEL="${CLIPCON_VAD_MODEL:-$STATE/models/ggml-silero-v5.1.2.bin}"
 BUNDLE_ID="com.angelobaricante.clipcon"
 APP="$BUILD/Build/Products/Debug/Clipcon.app"
 WORKER="$ROOT/worker/.venv/bin/clipcon-worker"
@@ -57,6 +58,7 @@ check_assets() {
     command -v "$tool" >/dev/null || fail "$tool is missing (see README one-time setup)"
   done
   [[ -f "$WHISPER_MODEL" ]] || fail "whisper model missing at $WHISPER_MODEL (see README one-time setup)"
+  [[ -f "$VAD_MODEL" ]] || fail "voice activity model missing at $VAD_MODEL (see README one-time setup)"
   ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$VISION_MODEL" \
     || fail "$VISION_MODEL is not downloaded: ollama pull $VISION_MODEL (needs internet once)"
 }

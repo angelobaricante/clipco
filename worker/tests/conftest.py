@@ -62,9 +62,11 @@ class ScriptedVision:
 
     identity = {"engine": "scripted-vision", "model": "fixture"}
 
-    def __init__(self, scripts: dict[str, str], fail: set[str] = frozenset()):
+    def __init__(self, scripts: dict[str, str], fail: set[str] = frozenset(),
+                 facing_camera: set[str] = frozenset({"a-roll.mp4"})):
         self.scripts = scripts
         self.fail = set(fail)
+        self.facing_camera = set(facing_camera)
         self.calls = 0
         self.on_describe = lambda request: None
 
@@ -81,6 +83,7 @@ class ScriptedVision:
             "observations": [{"frame_id": f.id, "text": seen} for f in request.frames],
             "interpretation": seen,
             "evidence_ids": [t.id for t in request.transcript] + [f.id for f in request.frames],
+            "speaker_facing_camera": request.original_filename in self.facing_camera,
         }
 
 
@@ -89,8 +92,10 @@ class RecordedVision:
 
     identity = {"engine": "recorded-vision", "model": "fixture"}
 
-    def __init__(self, invent_ids: bool = False, fail: bool = False, only_invented: bool = False):
+    def __init__(self, invent_ids: bool = False, fail: bool = False, only_invented: bool = False,
+                 echo_prompt_lines: bool = False):
         self.invent_ids = invent_ids
+        self.echo_prompt_lines = echo_prompt_lines  # cite "f1 at 4.0s" as the prompt lists it, not "f1"
         self.only_invented = only_invented
         self.fail = fail
         self.calls = 0
@@ -102,8 +107,9 @@ class RecordedVision:
         if self.fail:
             from clipcon_worker.vision import InferenceError
             raise InferenceError("recorded failure")
-        frame_ids = [f.id for f in request.frames]
-        transcript_ids = [t.id for t in request.transcript]
+        frame_ids = [f"{f.id} at {f.time:.1f}s" if self.echo_prompt_lines else f.id for f in request.frames]
+        transcript_ids = [f"{t.id} [{t.start:.1f}-{t.end:.1f}s]" if self.echo_prompt_lines else t.id
+                          for t in request.transcript]
         observations = [
             {"frame_id": fid, "text": f"Colour bars test pattern in {fid}."} for fid in frame_ids
         ]
@@ -118,6 +124,7 @@ class RecordedVision:
             "observations": observations,
             "interpretation": "The speaker introduces the test pattern.",
             "evidence_ids": cited,
+            "speaker_facing_camera": True,
         }
 
 
