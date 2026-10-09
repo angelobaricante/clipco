@@ -49,6 +49,9 @@ struct ClipActions: View {
                systemImage: allExcluded ? "eye" : "eye.slash") {
             Task { await model.setExcluded(targets, !allExcluded) }
         }
+        if model.canRetry(targets) {
+            Button("Re-analyse", systemImage: "arrow.clockwise") { Task { await model.retry(targets) } }
+        }
         Divider()
         Button(targets.count == 1 ? "Remove from Project…" : "Remove \(targets.count) Clips from Project…",
                systemImage: "trash", role: .destructive) {
@@ -79,7 +82,8 @@ struct ClipTable: View {
                 .width(70)
             TableColumn("Status") { clip in
                 let stage = clip.id == model.activity?.clipID ? model.activity?.stage : nil
-                Text(stage ?? clip.status.rawValue.capitalized).foregroundStyle(clip.status == .failed ? .orange : .primary)
+                Text(stage ?? clip.status.rawValue.capitalized)
+                    .foregroundStyle([.failed, .stale, .missing].contains(clip.status) ? .orange : .primary)
             }
             .width(min: 80, ideal: 120)
             TableColumn("Retrieval") { clip in
@@ -280,12 +284,14 @@ struct ClipCard: View {
             Label("Waiting", systemImage: "clock")
                 .font(.caption).padding(8)
                 .background(.regularMaterial, in: .rect(cornerRadius: 8))
-        case .failed:
-            Label("Failed", systemImage: "exclamationmark.triangle.fill")
+        case .failed, .stale, .missing:
+            Label(clip.status == .failed ? "Failed" : clip.status == .stale ? "Out of date" : "Original not found",
+                  systemImage: clip.status == .failed ? "exclamationmark.triangle.fill"
+                      : clip.status == .stale ? "clock.badge.exclamationmark" : "questionmark.folder")
                 .font(.caption).padding(8)
                 .background(.regularMaterial, in: .rect(cornerRadius: 8))
                 .foregroundStyle(.orange)
-        default:
+        case .ready:
             EmptyView()
         }
     }

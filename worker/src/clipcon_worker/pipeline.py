@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import media
-from .retrieval import Index
+from .retrieval import Index, live_status
 from .speech import TranscriptSpan
 from .store import Store
 from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailable, TranscriptItem, validate
@@ -31,6 +31,15 @@ Progress = Callable[[str, dict], None]
 A_ROLL_SPEECH_SHARE = 0.5
 
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts"})
+
+
+def missing_guidance(path: str) -> str:
+    return (f"The original is not at {path}. Move it back there, or locate the same file where it is now. "
+            "Its saved context is kept meanwhile; agents get no file location for it.")
+
+
+CHANGED_CONTENT = ("The original's content changed since it was indexed, so its saved context may not describe it. "
+                   "Re-analyse to refresh it, or restore the original file.")
 
 
 def new_id(prefix: str) -> str:
@@ -123,6 +132,11 @@ class Worker:
         related = Index(self.home).review_relationships([s["id"] for s in segments])
         for s in segments:
             s["relationships"] = related[s["id"]]
+        for clip in snapshot["clips"]:  # report what MCP reports, even before the next check_sources
+            if (status := live_status(clip)) != clip["status"]:
+                clip["status"], clip["error"] = status, (
+                    missing_guidance(clip["source_path"]) if status == "missing" else
+                    "The original changed on disk since it was indexed. Check sources to verify it, or re-analyse.")
         return snapshot
 
     def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
@@ -157,8 +171,9 @@ class Worker:
 
         try:
             stat = source.stat()
-            ready = existing is not None and existing["status"] == "ready"
-            if ready and existing["size_bytes"] == stat.st_size and abs(existing["mtime"] - stat.st_mtime) <= 1e-3:
+            analysed = existing is not None and existing["revision"] > 0
+            unchanged = analysed and existing["size_bytes"] == stat.st_size and abs(existing["mtime"] - stat.st_mtime) <= 1e-3
+            if unchanged and existing["status"] == "ready":
                 # Same size and modification time as when indexed (the check resolve_media applies): trust the
                 # saved content fingerprint instead of rehashing gigabytes, and keep the clip ready meanwhile.
                 report("fingerprinting", {"clip_id": clip_id, "cached": True})
@@ -167,7 +182,10 @@ class Worker:
                 stage("fingerprinting")
                 content = fingerprint(source)
             key = self.analysis_key(content)
-            if ready and existing["analysis_key"] == key:
+            if analysed and existing["fingerprint"] == content and existing["analysis_key"] == key:
+                # The saved context describes exactly this content under these settings (e.g. a restored
+                # original, or a retry after a failed re-analysis): publish it as current again, without inference.
+                self.store.set_source(clip_id, str(source), source.name, stat.st_size, stat.st_mtime)
                 self.store.set_status(clip_id, "ready")
                 report("ready", {"clip_id": clip_id, "reused": True})
                 return {"clip_id": clip_id, "reused": True, "revision": existing["revision"]}
@@ -183,10 +201,130 @@ class Worker:
             )
             report("ready", {"clip_id": clip_id, "reused": False, "revision": revision})
             return {"clip_id": clip_id, "reused": False, "revision": revision}
-        except Exception as e:
-            self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
+        except ServiceUnavailable as e:
+            # An outage says nothing about saved context that was usable before: a refresh of a ready, stale or
+            # missing clip leaves it as it was. Anything else records the failure, for a retry once it is back.
+            if existing and existing["status"] in ("ready", "stale", "missing"):
+                self.store.set_status(clip_id, existing["status"], error=existing["error"])
+            else:
+                self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
             report("failed", {"clip_id": clip_id, "error": str(e)})
             raise
+        except Exception as e:
+            if isinstance(e, FileNotFoundError) and not source.exists():
+                self.store.set_status(clip_id, "missing", error=missing_guidance(str(source)))
+                report("missing", {"clip_id": clip_id, "error": missing_guidance(str(source))})
+            else:
+                self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
+                report("failed", {"clip_id": clip_id, "error": str(e)})
+            raise
+
+    def retry(self, project_id: str, clip_ids: list[str], progress: Progress | None = None) -> dict:
+        """Re-run analysis for chosen clips from their originals, keeping each clip's ID, notes and exclusion.
+        Unchanged content with unchanged settings is reused; a missing original is reported, not analysed."""
+        report = progress or (lambda stage, detail: None)
+        for clip_id in clip_ids:
+            clip = self.store.clip(clip_id)
+            if clip is None or clip["project_id"] != project_id:
+                raise ValueError(f"clip {clip_id} is not in project {project_id}")
+        for clip_id in clip_ids:
+            clip = self.store.clip(clip_id)
+            source = Path(clip["source_path"])
+            if not source.is_file():
+                self.store.set_status(clip_id, "missing", error=missing_guidance(clip["source_path"]))
+                report("missing", {"clip_id": clip_id, "error": missing_guidance(clip["source_path"])})
+                continue
+            try:
+                self.import_clip(project_id, source, progress)
+            except ServiceUnavailable:
+                raise  # no clip can be analysed now; the rest keep their state for a later retry
+            except Exception:
+                continue  # recorded on the clip; the others carry on
+        return self._outcome(clip_ids)
+
+    def check_sources(self, project_id: str, progress: Progress | None = None) -> dict:
+        """Re-verify every analysed clip against its original and the current analysis settings. A missing
+        original marks the clip missing; changed content or settings mark it stale; an original that is back
+        and unchanged makes it ready again. Saved context, notes and exclusions are kept throughout."""
+        report = progress or (lambda stage, detail: None)
+        if self.store.project(project_id) is None:
+            raise ValueError(f"unknown project {project_id}")
+        clips = [c for c in self.store.clips(project_id)
+                 if c["revision"] > 0 and c["status"] in ("ready", "stale", "missing")]
+        for clip in clips:
+            status, error = self._verify(clip, report)
+            if (status, error) != (clip["status"], clip["error"]):
+                self.store.set_status(clip["id"], status, error=error)
+                report(status, {"clip_id": clip["id"], "error": error})
+        return self._outcome([c["id"] for c in clips])
+
+    def relink(self, project_id: str, clip_id: str, source: Path) -> dict:
+        """Point a clip at its original's new location. Only the same content is accepted, so a clip's context,
+        notes and relationships are never reassigned to different footage; a different file is a new clip."""
+        clip = self.store.clip(clip_id)
+        if clip is None or clip["project_id"] != project_id:
+            raise ValueError(f"clip {clip_id} is not in project {project_id}")
+        source = Path(source).expanduser().resolve()
+        if not source.is_file():
+            raise ValueError(f"{source} is not a file")
+        other = self.store.clip_by_path(project_id, str(source))
+        if other and other["id"] != clip_id:
+            raise ValueError(f"{source.name} is already clip {other['id']} in this Project")
+        if clip["fingerprint"] and fingerprint(source) != clip["fingerprint"]:
+            raise ValueError(f"{source.name} is not the same footage as {clip['original_filename']} (its content "
+                             "differs). Import it as a new clip instead.")
+        stat = source.stat()
+        self.store.set_source(clip_id, str(source), source.name, stat.st_size, stat.st_mtime)
+        if clip["revision"] == 0:  # never analysed: nothing to verify, it is ready for a retry
+            self.store.set_status(clip_id, "pending")
+        else:
+            self.store.set_status(clip_id, *self._verify(self.store.clip(clip_id), lambda stage, detail: None))
+        return self._outcome([clip_id])
+
+    def _verify(self, clip: dict, report: Progress) -> tuple[str, str | None]:
+        """(status, guidance) for an analysed clip: is its original still there, the same content, and was it
+        analysed with the current settings?"""
+        source = Path(clip["source_path"])
+        try:
+            stat = source.stat()
+        except OSError:
+            return "missing", missing_guidance(clip["source_path"])
+        if clip["size_bytes"] == stat.st_size and abs(clip["mtime"] - stat.st_mtime) <= 1e-3:
+            content = clip["fingerprint"]
+        else:
+            report("fingerprinting", {"clip_id": clip["id"]})
+            content = fingerprint(source)
+            if content != clip["fingerprint"]:
+                return "stale", CHANGED_CONTENT
+            self.store.set_source(clip["id"], clip["source_path"], clip["original_filename"], stat.st_size,
+                                  stat.st_mtime)  # touched but identical
+        if changed := self._settings_changed(clip):
+            return "stale", (f"Analysis settings changed since this clip was indexed ({', '.join(changed)}). "
+                             "Re-analyse to refresh its context.")
+        return "ready", None
+
+    def _settings_changed(self, clip: dict) -> list[str]:
+        """Which analysis settings differ from those that produced the clip's saved context. A model whose
+        identity cannot be read right now (e.g. Ollama not running) is not reported as changed."""
+        analysis = self.store.analysis(clip["id"], clip["revision"])
+        if analysis is None:
+            return []
+        changed = []
+        if json.loads(analysis["recipe"]) != json.loads(json.dumps(self.recipe)):
+            changed.append("analysis recipe")
+        if json.loads(analysis["speech_identity"]) != json.loads(json.dumps(self.speech.identity)):
+            changed.append("speech model")
+        saved, current = json.loads(analysis["vision_identity"]), self.vision.identity
+        if current.get("digest") == "" and saved.get("model") == current.get("model"):
+            pass  # digest unknown right now; same model name, so nothing to report
+        elif saved != json.loads(json.dumps(current)):
+            changed.append("vision model")
+        return changed
+
+    def _outcome(self, clip_ids: list[str]) -> dict:
+        clips = [self.store.clip(c) for c in clip_ids]
+        return {"clips": [{"clip_id": c["id"], "original_filename": c["original_filename"], "status": c["status"],
+                           "error": c["error"]} for c in clips]}
 
     def import_folder(self, project_id: str, folder: Path, progress: Progress | None = None) -> dict:
         return self.import_sources(project_id, [folder], progress)
@@ -222,9 +360,7 @@ class Worker:
                 raise  # no clip can be analysed now; the rest stay pending for a retry
             except Exception:
                 continue  # recorded on the clip as failed; the rest of the Project carries on
-        clips = [self.store.clip_by_path(project_id, str(s)) for s in sources]
-        return {"clips": [{"clip_id": c["id"], "original_filename": c["original_filename"], "status": c["status"],
-                           "error": c["error"]} for c in clips]}
+        return self._outcome([self.store.clip_by_path(project_id, str(s))["id"] for s in sources])
 
     def _describe(self, request: SegmentRequest, attempts: int = 2):
         """Ask the model for validated context, retrying once when its output fails validation."""

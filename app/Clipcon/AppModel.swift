@@ -89,6 +89,7 @@ final class AppModel {
     var mcpStatus: McpStatus?
     var isCheckingMcp = false
     var activity: ImportActivity?
+    var isCheckingSources = false
     var errorMessage: String?
     /// Awaiting confirmation in a destructive dialog.
     var clipsToRemove: [SourceClip] = []
@@ -247,6 +248,84 @@ final class AppModel {
         searchResults = nil
         try await reload()
         select(visibleClips.first?.id)
+        await checkSources()
+    }
+
+    /// Re-verifies every analysed clip's original (moved, deleted, edited, or restored) and the analysis
+    /// settings, then shows the result. Skipped while an import or retry is writing the index.
+    func checkSources() async {
+        guard let project, activity == nil else { return }
+        isCheckingSources = true
+        defer { isCheckingSources = false }
+        do {
+            try await worker.checkSources(projectID: project.id)
+            try await reload()
+        } catch {
+            errorMessage = "Could not check the original files: \(error.localizedDescription)"
+        }
+    }
+
+    /// Clips whose context is not current and that a re-analysis could refresh.
+    func canRetry(_ targets: [SourceClip]) -> Bool {
+        activity == nil && !targets.isEmpty && targets.allSatisfy { [.failed, .stale, .missing].contains($0.status) }
+    }
+
+    /// Re-analyses clips from their originals with real progress. Each keeps its ID, note, and exclusion;
+    /// unchanged content is reused without inference, and a missing original is reported, not analysed.
+    func retry(_ targets: [SourceClip]) async {
+        guard let project, canRetry(targets) else { return }
+        let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
+        activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
+        defer { activity = nil }
+        do {
+            guard await modelsReady() else { return }
+            let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
+                await MainActor.run { self?.track(event) }
+            }
+            _ = try await worker.retry(projectID: project.id, clipIDs: targets.map(\.id), onProgress: onProgress)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            report(error)
+            try? await reload()
+        }
+    }
+
+    /// Points a missing clip at the same original in its new place; a different file is refused by the worker.
+    func locate(_ clip: SourceClip, at url: URL) async {
+        guard let project else { return }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try await worker.relink(projectID: project.id, clipID: clip.id, source: url)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            errorMessage = "Could not use \(url.lastPathComponent) for \(clip.originalFilename): "
+                + error.localizedDescription
+        }
+    }
+
+    /// Loads the model when it is cold; false (with the reason shown) when analysis cannot run now.
+    private func modelsReady() async -> Bool {
+        if readiness?.state == .cold {
+            activity?.stage = "Loading model"
+            await warmUp()
+        }
+        guard readiness?.state == .ready else {
+            errorMessage = readiness.map { "\($0.detail) \($0.guidance)" } ?? "Local models are not ready."
+            return false
+        }
+        return true
+    }
+
+    private func report(_ error: Error) {
+        errorMessage = error.localizedDescription
+        if case WorkerError.failed(let kind, let message) = error,
+           kind == "InferenceError" || kind == "ServiceUnavailable" {
+            readiness = Readiness(state: kind == "ServiceUnavailable" ? .serviceUnavailable : .inferenceFailed,
+                                  detail: message, guidance: "Check the Ollama log, then retry the clip.")
+        }
     }
 
     /// Removal and deletion wait while footage is being imported, so an import never re-adds what was removed.
@@ -332,14 +411,7 @@ final class AppModel {
                                   stage: "Starting")
         defer { activity = nil }
         do {
-            if readiness?.state == .cold {
-                activity?.stage = "Loading model"
-                await warmUp()
-            }
-            guard readiness?.state == .ready else {
-                errorMessage = readiness.map { "\($0.detail) \($0.guidance)" } ?? "Local models are not ready."
-                return
-            }
+            guard await modelsReady() else { return }
             if let name = newProjectName {
                 let created = try await worker.createProject(name: name, context: context)
                 projects.append(created)
@@ -360,12 +432,7 @@ final class AppModel {
             }
             if !trimmedQuery.isEmpty { await search() }
         } catch {
-            errorMessage = error.localizedDescription
-            if case WorkerError.failed(let kind, let message) = error,
-               kind == "InferenceError" || kind == "ServiceUnavailable" {
-                readiness = Readiness(state: kind == "ServiceUnavailable" ? .serviceUnavailable : .inferenceFailed,
-                                      detail: message, guidance: "Check the Ollama log, then retry the clip.")
-            }
+            report(error)
             try? await reload()
         }
     }
@@ -386,7 +453,7 @@ final class AppModel {
             if selection.isEmpty || clips.allSatisfy({ $0.id != clipID }) { select(clipID) }
             Task { try? await reload() }
         }
-        if event.stage == "ready" || event.stage == "failed" { Task { try? await reload() } }
+        if ["ready", "failed", "missing"].contains(event.stage) { Task { try? await reload() } }
     }
 
     nonisolated static func describe(_ event: WorkerEvent) -> String {
@@ -401,6 +468,7 @@ final class AppModel {
         case "saving": return "Saving to index"
         case "ready": return event.reused == true ? "Reused saved context" : "Ready"
         case "failed": return "Failed"
+        case "missing": return "Original not found"
         default: return event.stage ?? "Working"
         }
     }

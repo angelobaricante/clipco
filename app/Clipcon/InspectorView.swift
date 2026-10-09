@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum InspectorTab: String, CaseIterable, Identifiable {
     case context = "Context", transcript = "Transcript", info = "Info"
@@ -55,6 +56,7 @@ struct InspectorView: View {
 struct StatusBanner: View {
     @Environment(AppModel.self) private var model
     let clip: SourceClip
+    @State private var locating = false
 
     var body: some View {
         switch clip.status {
@@ -65,19 +67,43 @@ struct StatusBanner: View {
         case .pending:
             Label("Waiting for analysis", systemImage: "clock").foregroundStyle(.secondary)
         case .failed:
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Analysis failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(clip.error ?? "Unknown error").font(.callout).textSelection(.enabled)
-                Button("Retry Analysis") {
-                    Task {
-                        await model.importFootage([URL(filePath: clip.sourcePath)], newProjectName: nil,
-                                               context: model.project?.context ?? "")
-                    }
-                }
-                .disabled(model.activity != nil)
-            }
-        default:
+            recovery("Analysis failed", symbol: "exclamationmark.triangle.fill",
+                     detail: clip.error ?? "Unknown error",
+                     kept: clip.segments.isEmpty ? nil : "Context below is from an earlier analysis and is not current.")
+        case .stale:
+            recovery("Context may be out of date", symbol: "clock.badge.exclamationmark",
+                     detail: clip.error ?? "The original or the analysis settings changed since it was indexed.",
+                     kept: "Codex sees this clip as stale and gets no file location until it is re-analysed.")
+        case .missing:
+            recovery("Original not found", symbol: "questionmark.folder",
+                     detail: clip.error ?? "The original is not at \(clip.sourcePath).",
+                     kept: "Saved context, your note, and exclusion are kept. Codex gets no file location for it.")
+        case .ready:
             EmptyView()
+        }
+    }
+
+    private func recovery(_ title: String, symbol: String, detail: String, kept: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: symbol).foregroundStyle(.orange).font(.headline)
+            Text(detail).font(.callout).textSelection(.enabled)
+            if let kept { Text(kept).font(.caption).foregroundStyle(.secondary) }
+            HStack {
+                if clip.status == .missing {
+                    Button("Locate…") { locating = true }
+                        .help("Choose the same file in its new location")
+                    Button("Check Again") { Task { await model.checkSources() } }
+                        .disabled(model.activity != nil || model.isCheckingSources)
+                } else {
+                    Button("Re-analyse") { Task { await model.retry([clip]) } }
+                        .disabled(!model.canRetry([clip]))
+                        .help("Analyse the original again; the clip keeps its note and exclusion")
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .fileImporter(isPresented: $locating, allowedContentTypes: [.movie]) { result in
+            if case .success(let url) = result { Task { await model.locate(clip, at: url) } }
         }
     }
 }
