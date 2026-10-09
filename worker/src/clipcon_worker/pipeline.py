@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import media
+from .retrieval import Index
 from .speech import TranscriptSpan
 from .store import Store
 from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailable, TranscriptItem, validate
@@ -116,7 +117,13 @@ class Worker:
         return self.store.create_project(new_id("prj"), name.strip(), context.strip())
 
     def snapshot(self, project_id: str) -> dict:
-        return self.store.snapshot(project_id)
+        """The Project as the app reviews it: saved context, notes, exclusions, and suggested relationships."""
+        snapshot = self.store.snapshot(project_id)
+        segments = [s for c in snapshot["clips"] for s in c["segments"]]
+        related = Index(self.home).review_relationships([s["id"] for s in segments])
+        for s in segments:
+            s["relationships"] = related[s["id"]]
+        return snapshot
 
     def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
         """Forget clips: their saved context and Clipcon's frame cache. The original video files stay untouched."""

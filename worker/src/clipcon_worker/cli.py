@@ -56,6 +56,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("clip_ids", nargs="+")
     p = sub.add_parser("delete-project", help="forget a Project's saved context (original files are not touched)")
     p.add_argument("--project", required=True)
+    p = sub.add_parser("set-note", help="save the creator's note for a clip (empty text clears it)")
+    p.add_argument("--clip", required=True)
+    p.add_argument("--text", required=True)
+    p = sub.add_parser("set-excluded", help="exclude clips from, or restore them to, default search results")
+    p.add_argument("--project", required=True)
+    p.add_argument("--excluded", required=True, choices=["yes", "no"])
+    p.add_argument("clip_ids", nargs="+")
     p = sub.add_parser("snapshot")
     p.add_argument("--project", required=True)
     p = sub.add_parser("search", help="search the saved index (reads only; starts no model)")
@@ -63,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--query", required=True)
     p.add_argument("--limit", type=int, default=SEARCH_PAGE)
     p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--include-excluded", action="store_true", help="also match clips the creator excluded")
     args = parser.parse_args(argv)
 
     ollama = OllamaVision(args.vision_model)
@@ -71,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
             from .mcp_check import connection_status
             emit("result", mcp=connection_status(args.home))
         elif args.command == "search":
-            emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset))
+            emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset,
+                                                             include_excluded=args.include_excluded))
         elif args.command == "readiness":
             emit("result", readiness=check(ollama, args.whisper_model, args.vad_model))
         elif args.command == "warmup":
@@ -89,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "delete-project":
                 worker.delete_project(args.project)
                 emit("result", deleted=args.project)
+            elif args.command == "set-note":
+                emit("result", note=worker.store.set_note(args.clip, args.text), clip_id=args.clip)
+            elif args.command == "set-excluded":
+                worker.store.set_excluded(args.project, args.clip_ids, args.excluded == "yes")
+                emit("result", excluded=args.excluded == "yes", clip_ids=args.clip_ids)
             elif args.command == "snapshot":
                 emit("result", snapshot=worker.snapshot(args.project))
             elif args.command in ("import", "import-sources"):

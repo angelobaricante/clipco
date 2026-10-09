@@ -35,7 +35,7 @@ RELATIONSHIPS_PER_RESULT = 3
 RELATIONSHIPS_PER_CONTEXT = 10
 
 # Evidence kinds a match can rest on, and how strongly each counts toward relevance.
-WEIGHTS = {"transcript": 3.0, "label": 2.0, "interpretation": 2.0, "observation": 1.5}
+WEIGHTS = {"transcript": 3.0, "creator_note": 3.0, "label": 2.0, "interpretation": 2.0, "observation": 1.5}
 # Further matching lines add less than the best one, so long Segments do not win on length alone.
 SUPPORTING_WEIGHT = 0.25
 
@@ -101,12 +101,13 @@ class Index:
         return {
             "project": {"project_id": project["id"], "name": project["name"], "context": project["context"]},
             "status_counts": dict(Counter(c["status"] for c in clips)),
+            "excluded_count": sum(1 for c in clips if c["excluded"]),
             "clips": [{
                 "clip_id": c["id"], "original_filename": c["original_filename"], "label": c["label"],
                 "role": c["role"], "status": c["status"], "stage": c["stage"], "error": c["error"],
                 "duration": c["duration"],
                 "speech_language": c["speech_language"], "segment_count": c["segment_count"],
-                "revision": c["revision"],
+                "revision": c["revision"], "excluded": bool(c["excluded"]),
             } for c in clips],
         }
 
@@ -114,7 +115,7 @@ class Index:
     def _segment(db: sqlite3.Connection, segment_id: str) -> sqlite3.Row:
         row = db.execute(
             "SELECT s.*, c.project_id, c.original_filename, c.source_path, c.status, c.revision, c.duration,"
-            " c.size_bytes, c.mtime, c.speech_language FROM segments s JOIN source_clips c ON c.id = s.clip_id"
+            " c.size_bytes, c.mtime, c.speech_language, c.excluded FROM segments s JOIN source_clips c ON c.id = s.clip_id"
             " WHERE s.id=?", (segment_id,)).fetchone()
         if row is None:
             raise RetrievalError(f"unknown segment_id {segment_id!r}; use a segment_id returned by search_footage")
@@ -139,8 +140,10 @@ class Index:
                 out.append({"frame_id": eid, "segment_id": o["segment_id"], "time": o["time"], "text": o["text"]})
         return out
 
-    def _relationships(self, db: sqlite3.Connection, segment_id: str, limit: int, full: bool) -> list[dict]:
-        """Suggested relationships touching a Segment, each naming the other Segment and what it is."""
+    def _relationships(self, db: sqlite3.Connection, segment_id: str, limit: int, full: bool,
+                       include_excluded: bool = False) -> list[dict]:
+        """Suggested relationships touching a Segment, each naming the other Segment and what it is. Segments
+        of clips the creator excluded are left out unless include_excluded."""
         rows = db.execute("SELECT * FROM relationships WHERE a_segment=? OR b_segment=? ORDER BY rowid",
                           (segment_id, segment_id)).fetchall()
         rows.sort(key=lambda r: list(RELATED_AS).index(r["kind"]))  # corrections, then takes, then B-roll
@@ -153,14 +156,23 @@ class Index:
             else:
                 other, related_as, cited = "a", RELATED_AS[r["kind"]][1], json.loads(r["a_evidence"])
             seg = self._segment(db, r[f"{other}_segment"])
+            if seg["excluded"] and not include_excluded:
+                continue
             excerpt = " ".join(dict.fromkeys(e["text"] for e in self._evidence(db, cited)))
             item = {"relationship_id": r["id"], "kind": r["kind"], "related_as": related_as,
                     **{k: v for k, v in self._reference(seg).items() if k != "project_id"},
-                    "excerpt": clip_text(excerpt), "basis": r["basis"], "suggested": True}
+                    "excerpt": clip_text(excerpt), "basis": r["basis"], "suggested": True,
+                    "excluded": bool(seg["excluded"])}
             if full:
                 item["evidence"] = self._evidence(db, json.loads(r["a_evidence"]) + json.loads(r["b_evidence"]))
             out.append(item)
         return out[:limit]
+
+    def review_relationships(self, segment_ids: list[str]) -> dict[str, list[dict]]:
+        """Every suggested relationship of these Segments, including ones to excluded clips, for the creator."""
+        with self._connect() as db:
+            return {sid: self._relationships(db, sid, RELATIONSHIPS_PER_CONTEXT, full=False, include_excluded=True)
+                    for sid in segment_ids}
 
     def segment_context(self, segment_id: str, window_seconds: float = 15.0) -> dict:
         """One Segment's evidence plus transcript up to window_seconds either side, kept distinct by kind."""
@@ -178,6 +190,7 @@ class Index:
             analysis = db.execute("SELECT * FROM analyses WHERE clip_id=? AND revision=?",
                                   (seg["clip_id"], seg["revision"])).fetchone()
             relationships = self._relationships(db, seg["id"], RELATIONSHIPS_PER_CONTEXT, full=True)
+            notes = db.execute("SELECT * FROM creator_notes WHERE clip_id=?", (seg["clip_id"],)).fetchall()
         speech = json.loads(analysis["speech_identity"]) if analysis else {}
         vision = json.loads(analysis["vision_identity"]) if analysis else {}
         omitted = max(0, len(spans) - CONTEXT_LINES_MAX)
@@ -200,15 +213,20 @@ class Index:
                 "transcript": "local speech recognition (timestamps from alignment)",
                 "observations": "local vision model describing sampled frames only",
                 "interpretation": "local model inference citing the evidence_ids above",
+                "creator_notes": "written by the creator in Clipcon about the whole Source clip; not model output",
                 "speech": speech, "vision": vision, "speech_language": seg["speech_language"],
                 "recipe_version": json.loads(analysis["recipe"]).get("version") if analysis else None,
                 "analyzed_at": analysis["finished_at"] if analysis else None,
             },
+            "excluded": bool(seg["excluded"]),
+            "exclusion_note": ("The creator excluded this clip from new default search results. Context already "
+                               "retrieved is not revoked, but do not choose this footage without asking."
+                               if seg["excluded"] else None),
             "relationships": relationships,
             "relationships_note": "Suggestions derived from saved evidence. Both sides stay in the index; "
                                   "none is marked preferred. The creator decides which statement or take to use.",
-            # Creator notes are not indexed yet.
-            "not_yet_available": ["creator_notes"],
+            "creator_notes": [{"clip_id": n["clip_id"], "text": n["text"], "updated_at": n["updated_at"]}
+                              for n in notes],
         }
 
     def preview(self, segment_id: str, frame_id: str | None = None) -> tuple[dict, bytes]:
@@ -274,16 +292,20 @@ class Index:
                 "note": "A locator only: it grants no new filesystem permission. Read the file with your own "
                         "tools under their normal access to this Mac."}
 
-    def search(self, project_id: str, query: str, limit: int = SEARCH_PAGE, offset: int = 0) -> dict:
-        """Rank Segments by query terms found in their saved evidence; return one bounded page."""
+    def search(self, project_id: str, query: str, limit: int = SEARCH_PAGE, offset: int = 0,
+               include_excluded: bool = False) -> dict:
+        """Rank Segments by query terms found in their saved evidence; return one bounded page. Clips the
+        creator excluded are skipped unless include_excluded."""
         limit = max(1, min(limit, SEARCH_PAGE_MAX))
         offset = max(0, offset)
         with self._connect() as db:
             self._project(db, project_id)
             segments = db.execute(
-                "SELECT s.*, c.original_filename, c.status, c.revision, c.project_id FROM segments s"
-                " JOIN source_clips c ON c.id = s.clip_id WHERE c.project_id=?"
-                " ORDER BY c.created_at, s.ordinal", (project_id,)).fetchall()
+                "SELECT s.*, c.original_filename, c.status, c.revision, c.project_id, c.excluded, n.text AS note"
+                " FROM segments s"
+                " JOIN source_clips c ON c.id = s.clip_id LEFT JOIN creator_notes n ON n.clip_id = c.id"
+                " WHERE c.project_id=? AND (? OR NOT c.excluded)"
+                " ORDER BY c.created_at, s.ordinal", (project_id, include_excluded)).fetchall()
             evidence = {}
             for seg in segments:
                 items = [("transcript", t["text"]) for t in db.execute(
@@ -291,10 +313,13 @@ class Index:
                 items += [("observation", o["text"]) for o in db.execute(
                     "SELECT text FROM observations WHERE segment_id=? ORDER BY rowid", (seg["id"],))]
                 items += [("interpretation", seg["interpretation"]), ("label", seg["label"])]
+                if seg["note"]:  # a clip-wide note, so it can match each of the clip's Segments
+                    items.append(("creator_note", seg["note"]))
                 evidence[seg["id"]] = items
             ranked = rank(query, segments, evidence)
             page = ranked[offset:offset + limit]
-            related = {seg["id"]: self._relationships(db, seg["id"], RELATIONSHIPS_PER_RESULT, full=False)
+            related = {seg["id"]: self._relationships(db, seg["id"], RELATIONSHIPS_PER_RESULT, full=False,
+                                                      include_excluded=include_excluded)
                        for _, seg, _ in page}
         more = offset + limit < len(ranked)
         return {
@@ -303,6 +328,7 @@ class Index:
             "results": [{
                 **self._reference(seg), "excerpt": clip_text(text), "evidence_basis": kind,
                 "status": seg["status"], "revision": seg["revision"], "score": round(score, 2),
+                "excluded": bool(seg["excluded"]), "has_creator_note": bool(seg["note"]),
                 "relationships": related[seg["id"]],
             } for score, seg, (_, kind, text) in page],
         }
