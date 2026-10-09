@@ -208,6 +208,16 @@ final class AppModel {
         }
     }
 
+    /// Adds clips to another Project: one shared analysis, a new membership with its own note and exclusion.
+    func addToProject(_ targets: [SourceClip], _ destination: Project) async {
+        do {
+            try await worker.addToProject(projectID: destination.id, clipIDs: targets.map(\.id))
+            try await reload()
+        } catch {
+            errorMessage = "Could not add to \(destination.name): \(error.localizedDescription)"
+        }
+    }
+
     /// Records the creator's role for one Segment (nil returns it to the suggested role).
     func setRole(_ role: String?, for segment: Segment) async {
         do {

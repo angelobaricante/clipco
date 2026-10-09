@@ -159,6 +159,12 @@ struct CreatorControls: View {
         }
         .toggleStyle(.switch)
         LabeledContent("Segment roles", value: clip.roleSummary.text)
+        ForEach(clip.unmatchedRoleCorrections, id: \.self) { kept in
+            Label("Your \(SegmentRole.name(kept.role)) choice for \(kept.start.timecode)–\(kept.end.timecode) "
+                  + "no longer matches a segment after re-analysis. Choose the role again below.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
         if clip.projects.count > 1 {
             LabeledContent("Also in") {
                 Text(clip.projects.filter { $0.projectId != model.project?.id }.map(\.name)

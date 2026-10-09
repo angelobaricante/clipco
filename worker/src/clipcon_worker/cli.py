@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import roles
 from .pipeline import Worker
 from .readiness import check, warm_up
 from .retrieval import SEARCH_PAGE, Index, default_home
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("clip_ids", nargs="+")
     p = sub.add_parser("set-segment-role", help="record the creator's footage role for a Segment")
     p.add_argument("--segment", required=True)
-    p.add_argument("--role", required=True, choices=["a-roll", "b-roll", "mixed", "needs_review", "suggested"],
+    p.add_argument("--role", required=True, choices=[*roles.ROLES, "suggested"],
                    help='"suggested" clears the correction')
     p = sub.add_parser("set-excluded", help="exclude clips from, or restore them to, default search results")
     p.add_argument("--project", required=True)

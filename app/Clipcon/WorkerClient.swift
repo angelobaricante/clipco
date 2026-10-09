@@ -148,6 +148,11 @@ struct WorkerClient: Sendable {
         _ = try await run(["set-note", "--project", projectID, "--clip", clipID, "--text", text])
     }
 
+    /// Adds library sources to another Project, reusing their analysis (no inference).
+    func addToProject(projectID: String, clipIDs: [String]) async throws {
+        _ = try await run(["add-to-project", "--project", projectID] + clipIDs)
+    }
+
     /// Allows or prevents reuse of sources as B-roll outside their own Projects. Reversible.
     func setReuse(clipIDs: [String], allowed: Bool) async throws {
         _ = try await run(["set-reuse", "--allowed", allowed ? "yes" : "no"] + clipIDs)

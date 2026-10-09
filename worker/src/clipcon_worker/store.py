@@ -340,7 +340,8 @@ class Store:
 
     def set_note(self, project_id: str, clip_id: str, text: str) -> dict | None:
         """Save the creator's note for a clip in one Project (empty text clears it). Notes sit beside the shared
-        analysed evidence and survive re-analysis; they never replace it or reach another Project."""
+        analysed evidence and survive re-analysis; they never replace it. Other Projects see a note only through
+        library results this membership supplies, attributed to this Project, and never while it is excluded."""
         self.require_member(project_id, clip_id)
         text = text.strip()
         self.db.execute("UPDATE memberships SET note=?, note_updated_at=? WHERE project_id=? AND clip_id=?",
@@ -505,6 +506,12 @@ class Store:
                 "role": self._role(s),
             })
         clip["role_summary"] = roles.summary([s["role"]["effective"] for s in clip["segments"]])
+        # Corrections made for Segment ranges a later re-analysis no longer has: kept and shown, never dropped.
+        ranges = {(s["start"], s["end"]) for s in clip["segments"]}
+        clip["unmatched_role_corrections"] = [
+            {"start": r["start"], "end": r["end_"], "role": r["role"], "updated_at": r["updated_at"]}
+            for r in db.execute("SELECT * FROM segment_roles WHERE clip_id=? ORDER BY start", (clip["id"],))
+            if (r["start"], r["end_"]) not in ranges]
         return clip
 
     def snapshot(self, project_id: str) -> dict:

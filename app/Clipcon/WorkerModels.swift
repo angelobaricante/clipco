@@ -63,6 +63,8 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     /// Every Project this library source belongs to (its analysis is shared; notes are not).
     var projects: [ProjectMembership]
     var roleSummary: RoleSummary
+    /// Creator role choices for Segment ranges that a later re-analysis no longer has.
+    var unmatchedRoleCorrections: [UnmatchedRoleCorrection]
 
     var displayLabel: String { label ?? originalFilename }
 
@@ -84,6 +86,12 @@ struct ProjectMembership: Decodable, Hashable, Sendable {
     var projectId: String
     var name: String
     var excluded: Bool
+}
+
+struct UnmatchedRoleCorrection: Decodable, Hashable, Sendable {
+    var start: Double
+    var end: Double
+    var role: String
 }
 
 struct RoleSummary: Decodable, Hashable, Sendable {

@@ -52,6 +52,14 @@ struct ClipActions: View {
         if model.canRetry(targets) {
             Button("Re-analyse", systemImage: "arrow.clockwise") { Task { await model.retry(targets) } }
         }
+        let others = model.projects.filter { $0.id != model.project?.id }
+        if !others.isEmpty {
+            Menu("Add to Project", systemImage: "folder.badge.plus") {
+                ForEach(others) { destination in
+                    Button(destination.name) { Task { await model.addToProject(targets, destination) } }
+                }
+            }
+        }
         Divider()
         Button(targets.count == 1 ? "Remove from Project…" : "Remove \(targets.count) Clips from Project…",
                systemImage: "trash", role: .destructive) {

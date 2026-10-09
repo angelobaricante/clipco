@@ -257,6 +257,15 @@ def test_segments_of_a_mixed_recording_get_their_own_roles_and_creator_correctio
     assert reusable() == set()
     assert clip_id == clip["id"]
 
+    # A re-analysis that draws different Segment boundaries cannot silently drop the creator's decision.
+    from clipcon_worker.pipeline import RECIPE
+    regrouped = Worker(home, speech=worker.speech, vision=worker.vision,
+                       recipe={**RECIPE, "silent_gap_seconds": 1000.0})
+    regrouped.retry(project, [clip_id])
+    [clip] = worker_cli(home, "snapshot", "--project", project)["snapshot"]["clips"]
+    assert [(c["start"], c["end"], c["role"]) for c in clip["unmatched_role_corrections"]] == [
+        (7.5, 20.5, "needs_review")]
+
 
 def test_library_only_footage_needs_no_project_and_copies_are_grouped(home, tmp_path):
     import shutil
