@@ -1,0 +1,7 @@
+{
+  "mark_contours" : 3,
+  "simplification_px" : 1.25,
+  "source" : "source\/approved-logo.png",
+  "threshold" : 0.5,
+  "wordmark_contours" : 9
+}
