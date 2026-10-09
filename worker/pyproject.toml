@@ -3,10 +3,13 @@ name = "clipcon-worker"
 version = "0.1.0"
 description = "Clipcon local indexing worker: FFmpeg, whisper.cpp, Ollama, SQLite."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "mcp>=1.20",
+]
 
 [project.scripts]
 clipcon-worker = "clipcon_worker.cli:main"
+clipcon-mcp = "clipcon_worker.mcp_server:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

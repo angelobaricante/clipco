@@ -18,6 +18,8 @@ final class ProbeState {
 enum AutomationRun {
     static func runIfRequested(_ model: AppModel) async {
         let defaults = UserDefaults.standard
+        // `-ClipconShowSetup YES` opens the setup sheet, e.g. to capture the Codex connection check.
+        if defaults.bool(forKey: "ClipconShowSetup") { model.showSetup = true }
         guard let path = defaults.string(forKey: "ClipconAutomationImport"),
               let out = defaults.string(forKey: "ClipconAutomationOut") else { return }
         let outDir = URL(filePath: out)

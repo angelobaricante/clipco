@@ -45,6 +45,8 @@ final class AppModel {
     var inspectorTab: InspectorTab = .context
     var showImport = false
     var showSetup = false
+    var mcpStatus: McpStatus?
+    var isCheckingMcp = false
     var activity: ImportActivity?
     var errorMessage: String?
 
@@ -78,6 +80,18 @@ final class AppModel {
         } catch {
             readiness = Readiness(state: .workerUnavailable, detail: error.localizedDescription,
                                   guidance: worker.setupGuidance)
+        }
+    }
+
+    /// Runs a real MCP session with the Codex helper; it reads the saved index and loads no model.
+    func checkMcp() async {
+        isCheckingMcp = true
+        defer { isCheckingMcp = false }
+        do {
+            mcpStatus = try await worker.mcpStatus()
+        } catch {
+            mcpStatus = nil
+            errorMessage = "Codex connection check failed: \(error.localizedDescription)"
         }
     }
 
