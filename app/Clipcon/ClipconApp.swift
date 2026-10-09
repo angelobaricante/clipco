@@ -9,7 +9,12 @@ struct ClipconApp: App {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)
-                .task { await model.start() }
+                .task {
+                    await model.start()
+                    #if DEBUG
+                    await AutomationRun.runIfRequested(model)
+                    #endif
+                }
         }
         .commands {
             CommandGroup(after: .newItem) {

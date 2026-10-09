@@ -7,11 +7,11 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
-    @State private var tab: InspectorTab = .context
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 0) {
-            Picker("Inspector section", selection: $tab) {
+            Picker("Inspector section", selection: $model.inspectorTab) {
                 ForEach(InspectorTab.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -22,7 +22,7 @@ struct InspectorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         StatusBanner(clip: clip)
-                        switch tab {
+                        switch model.inspectorTab {
                         case .context: ContextSection(clip: clip)
                         case .transcript: TranscriptSection(clip: clip)
                         case .info: InfoSection(clip: clip, project: model.project)

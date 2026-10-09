@@ -15,6 +15,7 @@
 		C8AB1EA0A246907F097BC95F /* ClipconApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 934BEE3D01D3B0ACF9233598 /* ClipconApp.swift */; };
 		CD1E75ACAE50BA641FCAFEFF /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701F40840D04F4E87AA0422F /* InspectorView.swift */; };
 		D3269EA7BDD799E7520CE78E /* Sheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E15B06A3D2E75C1DABE5D9F3 /* Sheets.swift */; };
+		DD6C200D8EB3B38B4FF57DCA /* AutomationRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = F600F10137054C9C5455D31F /* AutomationRun.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		934BEE3D01D3B0ACF9233598 /* ClipconApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipconApp.swift; sourceTree = "<group>"; };
 		D8DB14E2B061247011BDB5E9 /* WorkerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerClient.swift; sourceTree = "<group>"; };
 		E15B06A3D2E75C1DABE5D9F3 /* Sheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sheets.swift; sourceTree = "<group>"; };
+		F600F10137054C9C5455D31F /* AutomationRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationRun.swift; sourceTree = "<group>"; };
 		F95B6881F8025E59DD72D1B6 /* WorkerModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerModels.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -51,6 +53,7 @@
 			isa = PBXGroup;
 			children = (
 				6CB60F6DCA37127977BD9262 /* AppModel.swift */,
+				F600F10137054C9C5455D31F /* AutomationRun.swift */,
 				5270C7CF4A0608B2BABBB089 /* BrowserView.swift */,
 				934BEE3D01D3B0ACF9233598 /* ClipconApp.swift */,
 				18C82248B9342F6037C6EAA0 /* ContentView.swift */,
@@ -119,6 +122,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7B9D461236C48C884811F2CD /* AppModel.swift in Sources */,
+				DD6C200D8EB3B38B4FF57DCA /* AutomationRun.swift in Sources */,
 				BEA5754A0A36B505FC751311 /* BrowserView.swift in Sources */,
 				C8AB1EA0A246907F097BC95F /* ClipconApp.swift in Sources */,
 				2FB3CBB6B9AE4D7AE1962281 /* ContentView.swift in Sources */,

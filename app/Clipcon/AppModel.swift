@@ -42,6 +42,7 @@ final class AppModel {
     var filter: FootageFilter = .all
     var selection: SourceClip.ID?
     var showInspector = true
+    var inspectorTab: InspectorTab = .context
     var showImport = false
     var showSetup = false
     var activity: ImportActivity?
