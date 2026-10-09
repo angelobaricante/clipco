@@ -162,9 +162,8 @@ struct ProjectDialogs: ViewModifier {
     }
 }
 
-/// A sidebar row: a footage filter of the open Project, or another Project to open.
+/// Sidebar destinations: Projects and the reusable Footage library.
 enum SidebarItem: Hashable {
-    case filter(FootageFilter)
     case project(Project.ID)
     case library
 }
@@ -177,45 +176,21 @@ struct SidebarView: View {
         List(selection: Binding<SidebarItem?>(
             get: {
                 if model.showingLibrary { return .library }
-                // Roles refine the browser; they are not separate sidebar destinations.
-                return .filter([.aRoll, .bRoll].contains(model.filter) ? .all : model.filter)
+                return model.project.map { .project($0.id) }
             },
             set: { item in
                 switch item {
                 case .library: Task { await model.openLibrary() }
-                case .filter(let filter):
-                    if model.showingLibrary, let project = model.project {
-                        Task {
-                            do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
-                            model.filter = filter
-                        }
-                    } else {
-                        model.filter = filter
-                    }
                 case .project(let id):
                     guard let project = model.projects.first(where: { $0.id == id }) else { return }
                     Task {
+                        model.filter = .all
                         do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
                     }
                 case nil: break
                 }
             })
         ) {
-            if !model.showingLibrary {
-            Section("Project") {
-                FilterRow(filter: .all, count: model.count(.all))
-            }
-            Section("Review") {
-                ForEach([FootageFilter.needsReview, .excluded]) { filter in
-                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
-                }
-            }
-            }
-            Section("Footage Library") {
-                Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
-                    .tag(SidebarItem.library)
-                    .help("B-roll you allow to be reused, from every Project and library-only footage")
-            }
             Section("Projects") {
                 Button("New Project…", systemImage: "plus") { model.showNewProject = true }
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
@@ -236,6 +211,11 @@ struct SidebarView: View {
                     }
                 }
             }
+            Section("Footage Library") {
+                Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
+                    .tag(SidebarItem.library)
+                    .help("B-roll you allow to be reused, from every Project and library-only footage")
+            }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
@@ -246,19 +226,6 @@ struct SidebarView: View {
             }
             .padding(12)
         }
-    }
-}
-
-struct FilterRow: View {
-    let filter: FootageFilter
-    /// Nil while the library is shown, whose clips are not this Project's.
-    let count: Int?
-
-    var body: some View {
-        Label(filter.rawValue, systemImage: filter.symbol)
-            .badge(count ?? 0)
-            .tag(SidebarItem.filter(filter))
-            .accessibilityLabel(count.map { "\(filter.rawValue), \($0) \($0 == 1 ? "clip" : "clips")" } ?? filter.rawValue)
     }
 }
 

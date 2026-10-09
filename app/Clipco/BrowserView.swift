@@ -9,22 +9,24 @@ struct BrowserView: View {
     var body: some View {
         browser
             .safeAreaInset(edge: .top, spacing: 0) {
-                if model.hasScope, !model.showingLibrary, model.trimmedQuery.isEmpty,
-                   [.all, .aRoll, .bRoll].contains(model.filter) {
+                if model.hasScope, !model.showingLibrary, model.trimmedQuery.isEmpty {
                     HStack {
                         Text("\(model.visibleClips.count) \(model.visibleClips.count == 1 ? "clip" : "clips")")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         @Bindable var model = model
-                        Picker("Footage role", selection: $model.filter) {
-                            Text("All Roles").tag(FootageFilter.all)
+                        Picker("Filter footage", selection: $model.filter) {
+                            Text("All Footage").tag(FootageFilter.all)
                             Text("A-roll").tag(FootageFilter.aRoll)
                             Text("B-roll").tag(FootageFilter.bRoll)
+                            Divider()
+                            Text("Needs Review").tag(FootageFilter.needsReview)
+                            Text("Excluded").tag(FootageFilter.excluded)
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .fixedSize()
-                        .help("Filter by Segment role; a mixed clip can appear in both roles")
+                        .help("Filter this Project’s footage by role or review status")
                     }
                     .padding(.horizontal, 16).padding(.vertical, 8)
                     .background(.bar)

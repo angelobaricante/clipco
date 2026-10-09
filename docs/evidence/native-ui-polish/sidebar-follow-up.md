@@ -19,3 +19,15 @@ Validation:
 Limits: coordinate-only pointer automation returned noWindowsAvailable, while indexed native clicks and double-clicks succeeded. No measured click-to-render latency, processing-load profile, full VoiceOver run, or light appearance check. Selection recognition no longer explicitly waits for double-click failure in source; real-device timing remains unmeasured.
 
 Existing #18 queue lifecycle acceptance and unrelated #22 branding changes remain separate. Historical 10:00 Manila planning reference was less than two hours away at session start, already inside the agreed submission buffer; organizer cutoff was not independently verified and no submission was authorized.
+
+## Project-first revision
+
+The creator requested removing the separate All Footage sidebar row and moving Projects and its folders to the top. The sidebar now selects the active Project directly; opening a Project resets its browser to all footage. A single browser filter menu retains All Footage, A-roll, B-roll, Needs Review and Excluded, while reusable library browsing remains a separate destination without Project filters. Removed the unused sidebar filter row type.
+
+| Before | After | Why |
+| --- | --- | --- |
+| All Footage duplicates the active Project destination | Project folder opens all its footage directly | One clear navigation target |
+| Projects below filter sections | Projects first, then Footage Library | Primary work is immediately reachable |
+| Review filters occupy sidebar rows | Review and role choices in the browser menu | Active Project stays highlighted while refining its collection |
+
+Validation: fresh Debug xcodebuild BUILD SUCCEEDED; git diff --check passed. Rebuilt native app on the same isolated scratch index verifies Projects first with the active folder selected, all five browser menu options, Excluded filtering with active Project highlight and empty inspector, switching to another Project resets to All Footage, and reusable library selection hides Project filters. No inference or source modifications. Existing validation limits above still apply.
