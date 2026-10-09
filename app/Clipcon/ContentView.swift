@@ -34,14 +34,16 @@ struct ContentView: View {
             }
         }
         .confirmationDialog(
-            "Remove “\(model.clipToRemove?.originalFilename ?? "")” from this Project?",
-            isPresented: Binding(get: { model.clipToRemove != nil }, set: { if !$0 { model.clipToRemove = nil } }),
-            presenting: model.clipToRemove
-        ) { clip in
-            Button("Remove from Project", role: .destructive) { Task { await model.remove(clip) } }
-        } message: { _ in
-            Text("Clipcon deletes its transcript, frame observations, and suggested relationships for this clip. "
-                 + "The original video file stays where it is.")
+            model.clipsToRemove.count == 1 ? "Remove “\(model.clipsToRemove[0].originalFilename)” from this Project?"
+                                           : "Remove \(model.clipsToRemove.count) clips from this Project?",
+            isPresented: Binding(get: { !model.clipsToRemove.isEmpty }, set: { if !$0 { model.clipsToRemove = [] } }),
+            presenting: model.clipsToRemove
+        ) { clips in
+            Button("Remove from Project", role: .destructive) { Task { await model.remove(clips) } }
+        } message: { clips in
+            Text("Clipcon deletes its transcript, frame observations, and suggested relationships for "
+                 + (clips.count == 1 ? "this clip. The original video file stays where it is."
+                                     : "these clips. The original video files stay where they are."))
         }
         .confirmationDialog(
             "Delete the Project “\(model.projectToDelete?.name ?? "")”?",
@@ -53,6 +55,14 @@ struct ContentView: View {
             Text("Clipcon deletes the saved context for every clip in this Project, and Codex can no longer "
                  + "retrieve it. Your original video files are not affected.")
         }
+        #if DEBUG
+        // `-ClipconSelectionLog /path` records each selection change, to verify mouse selection from outside.
+        .onChange(of: model.selection) {
+            guard let path = UserDefaults.standard.string(forKey: "ClipconSelectionLog") else { return }
+            let names = model.clips.filter { model.selection.contains($0.id) }.map(\.originalFilename)
+            try? (names.sorted().joined(separator: ",") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        }
+        #endif
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .sheet(isPresented: $model.showSetup) { SetupSheet() }
         .alert("Something went wrong", isPresented: Binding(

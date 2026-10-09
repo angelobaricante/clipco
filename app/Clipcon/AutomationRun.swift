@@ -28,7 +28,7 @@ enum AutomationRun {
         if removing != nil || deleting != nil, let out = defaults.string(forKey: "ClipconAutomationOut") {
             var report: [String: Any] = [:]
             if let name = removing, let clip = model.clips.first(where: { $0.originalFilename == name }) {
-                await model.remove(clip)
+                await model.remove([clip])
                 report["clips_after_remove"] = model.clips.map(\.originalFilename)
             }
             if let name = deleting, let project = model.projects.first(where: { $0.name == name }) {

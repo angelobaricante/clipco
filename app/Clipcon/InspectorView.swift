@@ -31,6 +31,9 @@ struct InspectorView: View {
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            } else if model.selection.count > 1 {
+                ContentUnavailableView("\(model.selection.count) Clips Selected", systemImage: "square.stack",
+                                       description: Text("Select one clip to inspect its context."))
             } else {
                 ContentUnavailableView("No Selection", systemImage: "sidebar.trailing",
                                        description: Text("Select a clip to inspect its context."))

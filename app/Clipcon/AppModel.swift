@@ -42,7 +42,10 @@ final class AppModel {
     var project: Project?
     var clips: [SourceClip] = []
     var filter: FootageFilter = .all
-    var selection: SourceClip.ID?
+    /// Selected Source clips in the browser (Finder-style multiple selection).
+    var selection: Set<SourceClip.ID> = []
+    /// The clip a ⇧-click range or arrow key starts from: the last one clicked or moved to.
+    var selectionAnchor: SourceClip.ID?
     var showInspector = true
     var inspectorTab: InspectorTab = .context
     var showImport = false
@@ -52,7 +55,7 @@ final class AppModel {
     var activity: ImportActivity?
     var errorMessage: String?
     /// Awaiting confirmation in a destructive dialog.
-    var clipToRemove: SourceClip?
+    var clipsToRemove: [SourceClip] = []
     var projectToDelete: Project?
     var searchText = ""
     var searchResults: SearchPage?
@@ -64,7 +67,14 @@ final class AppModel {
     var trimmedQuery: String { searchText.trimmingCharacters(in: .whitespaces) }
 
     var visibleClips: [SourceClip] { clips.filter(filter.includes) }
-    var selectedClip: SourceClip? { clips.first { $0.id == selection } }
+    /// The one clip the inspector shows; nil when none or several are selected.
+    var selectedClip: SourceClip? { selection.count == 1 ? clips.first { selection.contains($0.id) } : nil }
+    var selectedClips: [SourceClip] { visibleClips.filter { selection.contains($0.id) } }
+
+    func select(_ id: SourceClip.ID?) {
+        selection = id.map { [$0] } ?? []
+        selectionAnchor = id
+    }
     var canAnalyze: Bool { readiness?.state == .ready || readiness?.state == .cold }
 
     func count(_ filter: FootageFilter) -> Int { clips.filter(filter.includes).count }
@@ -122,27 +132,32 @@ final class AppModel {
         guard project.id != self.project?.id else { return }
         self.project = project
         clips = []
-        selection = nil
+        select(nil)
         selectedHit = nil
         searchText = ""
         searchResults = nil
         try await reload()
+        select(visibleClips.first?.id)
     }
 
     /// Removal and deletion wait while footage is being imported, so an import never re-adds what was removed.
     var canDelete: Bool { activity == nil }
 
-    /// Forgets a clip's saved context in Clipcon; the original video file stays where it is.
-    func remove(_ clip: SourceClip) async {
-        guard let project, canDelete else { return }
-        let next = visibleClips.drop { $0.id != clip.id }.dropFirst().first ?? visibleClips.last { $0.id != clip.id }
+    /// Forgets clips' saved context in Clipcon; the original video files stay where they are.
+    func remove(_ doomed: [SourceClip]) async {
+        guard let project, canDelete, !doomed.isEmpty else { return }
+        let ids = Set(doomed.map(\.id))
+        // Like Finder, the selection moves to the clip after the last removed one.
+        let after = visibleClips.lastIndex { ids.contains($0.id) }.map { visibleClips[($0 + 1)...] } ?? []
+        let next = after.first { !ids.contains($0.id) } ?? visibleClips.last { !ids.contains($0.id) }
         do {
-            try await worker.removeClips(projectID: project.id, clipIDs: [clip.id])
-            if selection == clip.id { selection = next?.id }
+            try await worker.removeClips(projectID: project.id, clipIDs: doomed.map(\.id))
+            if !selection.isDisjoint(with: ids) { select(next?.id) }
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
         } catch {
-            errorMessage = "Could not remove \(clip.originalFilename): \(error.localizedDescription)"
+            let what = doomed.count == 1 ? doomed[0].originalFilename : "\(doomed.count) clips"
+            errorMessage = "Could not remove \(what): \(error.localizedDescription)"
         }
     }
 
@@ -155,7 +170,7 @@ final class AppModel {
             if project?.id == doomed.id {
                 project = nil
                 clips = []
-                selection = nil
+                select(nil)
                 searchText = ""
                 searchResults = nil
                 if let latest = projects.last { try await open(latest) }
@@ -172,7 +187,10 @@ final class AppModel {
         let snapshot = try await worker.snapshot(projectID: project.id)
         guard generation == reloadGeneration else { return }  // a newer reload is already on its way
         clips = snapshot.clips
-        if selection == nil || selectedClip == nil { selection = clips.first?.id }
+        // Drop clips that no longer exist; never invent a selection the creator cleared.
+        let hadSelection = !selection.isEmpty
+        selection.formIntersection(clips.map(\.id))
+        if hadSelection && selection.isEmpty { select(visibleClips.first?.id) }
     }
 
     /// Searches the saved index in a separate worker process: no model starts, and it answers while
@@ -227,7 +245,7 @@ final class AppModel {
             } else {
                 let result = try await worker.importClip(projectID: project.id, source: url, onProgress: onProgress)
                 try await reload()
-                selection = result.clipId
+                select(result.clipId)
             }
             if !trimmedQuery.isEmpty { await search() }
         } catch {
@@ -254,7 +272,7 @@ final class AppModel {
         if activity?.clipID != clipID {
             if let name = clips.first(where: { $0.id == clipID })?.originalFilename { activity?.filename = name }
             activity?.clipID = clipID
-            if selection == nil || clips.allSatisfy({ $0.id != clipID }) { selection = clipID }
+            if selection.isEmpty || clips.allSatisfy({ $0.id != clipID }) { select(clipID) }
             Task { try? await reload() }
         }
         if event.stage == "ready" || event.stage == "failed" { Task { try? await reload() } }

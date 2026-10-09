@@ -1,3 +1,4 @@
+import AppKit
 import ImageIO
 import SwiftUI
 
@@ -18,40 +19,135 @@ struct BrowserView: View {
                 Button("Import Footage…") { model.showImport = true }
             }
         } else {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(model.visibleClips) { clip in
-                        ClipCard(clip: clip, isSelected: model.selection == clip.id,
-                                 liveStage: clip.id == model.activity?.clipID ? model.activity?.stage : nil)
-                            .onTapGesture { model.selection = clip.id }
-                            .contextMenu {
-                                Button("Remove from Project…", systemImage: "trash", role: .destructive) {
-                                    model.clipToRemove = clip
-                                }
-                                .disabled(!model.canDelete)
-                            }
-                    }
-                }
-                .padding(16)
-            }
-            .focusable()
-            .focusEffectDisabled()
-            .onMoveCommand(perform: move)
-            .onDeleteCommand {  // the Delete key and Edit ▸ Delete
-                if model.canDelete, let clip = model.selectedClip { model.clipToRemove = clip }
-            }
+            ClipGrid(columns: columns)
         }
+    }
+}
+
+/// The footage grid with Finder-style selection: click, ⌘-click, ⇧-click, ⌘A, arrow keys, and dragging a
+/// selection rectangle from empty space (⇧ adds to the selection, ⌘ toggles).
+struct ClipGrid: View {
+    @Environment(AppModel.self) private var model
+    let columns: [GridItem]
+
+    @State private var frames: [SourceClip.ID: CGRect] = [:]
+    @State private var viewportHeight: CGFloat = 0
+    @State private var marquee: Marquee?
+    @FocusState private var focused: Bool  // like Finder, clicking the browser makes it take keyboard input
+
+    private struct Marquee {
+        var start: CGPoint
+        var rect: CGRect
+        var base: Set<SourceClip.ID>
+        var modifiers: NSEvent.ModifierFlags
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(model.visibleClips) { clip in
+                    ClipCard(clip: clip, isSelected: model.selection.contains(clip.id),
+                             liveStage: clip.id == model.activity?.clipID ? model.activity?.stage : nil)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: {
+                            frames[clip.id] = $0
+                        }
+                        .onTapGesture { click(clip.id) }
+                        .contextMenu { contextMenu(for: clip) }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .top)
+            .background {  // empty space: a click clears the selection, a drag draws the selection rectangle
+                Color.clear.contentShape(.rect)
+                    .onTapGesture {
+                        focused = true
+                        model.select(nil)
+                    }
+                    .gesture(DragGesture(minimumDistance: 3, coordinateSpace: .named(Self.space))
+                        .onChanged(drag).onEnded { _ in marquee = nil })
+            }
+            .overlay(alignment: .topLeading) {
+                if let rect = marquee?.rect {
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.15))
+                        .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                        .allowsHitTesting(false)
+                }
+            }
+            .coordinateSpace(.named(Self.space))
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onAppear { focused = true }
+        .onMoveCommand(perform: move)
+        .onCommand(#selector(NSResponder.selectAll(_:))) {  // ⌘A
+            model.selection = Set(model.visibleClips.map(\.id))
+        }
+        .onDeleteCommand {  // the Delete key and Edit ▸ Delete
+            if model.canDelete, !model.selectedClips.isEmpty { model.clipsToRemove = model.selectedClips }
+        }
+    }
+
+    private nonisolated static let space = "clip-grid"
+
+    private func click(_ id: SourceClip.ID) {
+        focused = true
+        let modifiers = NSEvent.modifierFlags
+        if modifiers.contains(.command) {
+            model.selection.formSymmetricDifference([id])
+            model.selectionAnchor = id
+        } else if modifiers.contains(.shift), let anchor = model.selectionAnchor,
+                  let from = model.visibleClips.firstIndex(where: { $0.id == anchor }),
+                  let to = model.visibleClips.firstIndex(where: { $0.id == id }) {
+            model.selection = Set(model.visibleClips[min(from, to)...max(from, to)].map(\.id))
+        } else {
+            model.select(id)
+        }
+    }
+
+    private func drag(_ value: DragGesture.Value) {
+        if marquee == nil {
+            focused = true
+            let modifiers = NSEvent.modifierFlags
+            let keep = modifiers.contains(.shift) || modifiers.contains(.command)
+            marquee = Marquee(start: value.startLocation, rect: .zero, base: keep ? model.selection : [],
+                              modifiers: modifiers)
+        }
+        guard var current = marquee else { return }
+        current.rect = CGRect(x: min(current.start.x, value.location.x), y: min(current.start.y, value.location.y),
+                              width: abs(value.location.x - current.start.x),
+                              height: abs(value.location.y - current.start.y))
+        marquee = current
+        let visible = Set(model.visibleClips.map(\.id))
+        let touched = Set(frames.filter { visible.contains($0.key) && $0.value.intersects(current.rect) }.keys)
+        model.selection = current.modifiers.contains(.command) ? current.base.symmetricDifference(touched)
+                                                               : current.base.union(touched)
+        if let first = model.visibleClips.first(where: { touched.contains($0.id) }) { model.selectionAnchor = first.id }
+    }
+
+    @ViewBuilder private func contextMenu(for clip: SourceClip) -> some View {
+        // Like Finder: acting on a selected clip acts on the whole selection.
+        let targets = model.selection.contains(clip.id) ? model.selectedClips : [clip]
+        Button(targets.count == 1 ? "Remove from Project…" : "Remove \(targets.count) Clips from Project…",
+               systemImage: "trash", role: .destructive) {
+            model.clipsToRemove = targets
+        }
+        .disabled(!model.canDelete)
     }
 
     private func move(_ direction: MoveCommandDirection) {
         let ids = model.visibleClips.map(\.id)
-        guard let current = model.selection.flatMap(ids.firstIndex(of:)) else {
-            model.selection = ids.first
+        guard let current = model.selectionAnchor.flatMap(ids.firstIndex(of:)) else {
+            model.select(ids.first)
             return
         }
         switch direction {
-        case .left, .up: model.selection = ids[max(current - 1, 0)]
-        case .right, .down: model.selection = ids[min(current + 1, ids.count - 1)]
+        case .left, .up: model.select(ids[max(current - 1, 0)])
+        case .right, .down: model.select(ids[min(current + 1, ids.count - 1)])
         @unknown default: break
         }
     }
@@ -121,7 +217,7 @@ struct SearchResultsView: View {
                 get: { model.selectedHit },
                 set: { id in
                     model.selectedHit = id
-                    if let hit = page.results.first(where: { $0.id == id }) { model.selection = hit.clipId }
+                    if let hit = page.results.first(where: { $0.id == id }) { model.select(hit.clipId) }
                 })
             ) { hit in
                 SearchHitRow(hit: hit).tag(hit.id)
