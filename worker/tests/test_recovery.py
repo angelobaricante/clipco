@@ -90,7 +90,8 @@ def test_a_missing_original_is_reported_everywhere_and_restored_without_losing_c
     [hit] = [r for r in found["results"] if r["clip_id"] == pour["id"]]
     assert hit["status"] == "missing" and hit["status_note"]
     assert media["available"] is False and media["state"] == "missing" and "path" not in media
-    app = {c["original_filename"]: c for c in worker_cli(home, "snapshot", "--project", pid)["snapshot"]["clips"]}
+    assert media["index_status"] == "missing"  # one answer per clip, whichever tool asks
+    app ={c["original_filename"]: c for c in worker_cli(home, "snapshot", "--project", pid)["snapshot"]["clips"]}
     assert app["broll-1-pour.mp4"]["status"] == "missing" and "Move it back" in app["broll-1-pour.mp4"]["error"]
 
     # A retry cannot analyse what is not there; it says what to do instead.

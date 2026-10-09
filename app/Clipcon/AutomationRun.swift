@@ -96,6 +96,74 @@ enum AutomationRun {
         NSApp.terminate(nil)
     }
 
+    /// Recovery workflow on a real Project, through the same model calls as the inspector's recovery banner and
+    /// the Clip menu. Sources were already checked when the Project opened; the report records what the creator
+    /// sees, then optionally locates the original and/or re-analyses, recording the stages shown meanwhile.
+    ///
+    ///   Clipcon -ClipconAutomationRecover <filename> -ClipconAutomationOut /tmp/out
+    ///     [-ClipconAutomationLocate /path/to/moved.mov] [-ClipconAutomationRetry YES] [-ClipconAutomationHold 8]
+    static func recover(_ model: AppModel, clipNamed name: String, out: URL, defaults: UserDefaults) async {
+        var report: [String: Any] = ["project": model.project?.name ?? NSNull()]
+        func state(_ step: String) {
+            let clip = model.clips.first { $0.originalFilename == name }
+            var seen: [String: Any] = ["status": clip?.status.rawValue ?? "absent"]
+            seen["guidance"] = clip?.error ?? NSNull()
+            seen["can_reanalyse"] = clip.map { model.canRetry([$0]) } ?? false
+            seen["note"] = clip?.note?.text ?? NSNull()
+            seen["excluded"] = clip?.excluded ?? NSNull()
+            seen["segments"] = clip?.segments.count ?? 0
+            seen["error"] = model.errorMessage ?? NSNull()
+            report[step] = seen
+        }
+        guard let clip = model.clips.first(where: { $0.originalFilename == name }) else {
+            report["error"] = "no clip named \(name)"
+            write(report, to: out)
+            NSApp.terminate(nil)
+            return
+        }
+        report["clip_id"] = clip.id
+        model.select(clip.id)
+        model.inspectorTab = .context
+        try? await Task.sleep(for: .milliseconds(600))
+        state("on_open")
+        if let path = defaults.string(forKey: "ClipconAutomationLocate") {
+            await model.locate(clip, at: URL(filePath: path))
+            try? await Task.sleep(for: .milliseconds(600))
+            state("after_locate")
+            model.errorMessage = nil
+        }
+        if defaults.bool(forKey: "ClipconAutomationRetry"), let current = model.clips.first(where: { $0.id == clip.id }) {
+            let started = Date()
+            let probe = ProbeState()
+            let stageWatch = Task { @MainActor in
+                var last = ""
+                while probe.probing {
+                    let t = Date()
+                    if let stage = model.activity?.stage, stage != last {
+                        last = stage
+                        probe.stages.append(["t": Date().timeIntervalSince(started), "stage": stage])
+                    }
+                    try? await Task.sleep(for: .milliseconds(50))
+                    probe.worstStall = max(probe.worstStall, Date().timeIntervalSince(t) - 0.05)
+                }
+            }
+            await model.retry([current])
+            probe.probing = false
+            await stageWatch.value
+            report["retry_seconds"] = Date().timeIntervalSince(started)
+            report["retry_stages"] = probe.stages
+            report["worst_main_thread_stall_ms"] = (probe.worstStall * 1000).rounded()
+            try? await Task.sleep(for: .milliseconds(600))
+            state("after_retry")
+        }
+        report["statuses"] = Dictionary(uniqueKeysWithValues: model.clips.map { ($0.originalFilename, $0.status.rawValue) })
+        report["window_number"] = NSApp.windows.first { $0.isVisible }?.windowNumber ?? NSNull()
+        write(report, to: out)
+        // `-ClipconAutomationHold <seconds>` keeps the window up, e.g. for `screencapture -l <window_number>`.
+        try? await Task.sleep(for: .seconds(defaults.double(forKey: "ClipconAutomationHold")))
+        NSApp.terminate(nil)
+    }
+
     private static func write(_ report: [String: Any], to out: URL) {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
@@ -107,6 +175,11 @@ enum AutomationRun {
         if let name = defaults.string(forKey: "ClipconAutomationReview"),
            let out = defaults.string(forKey: "ClipconAutomationOut") {
             await review(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)
+            return
+        }
+        if let name = defaults.string(forKey: "ClipconAutomationRecover"),
+           let out = defaults.string(forKey: "ClipconAutomationOut") {
+            await recover(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)
             return
         }
         // `-ClipconShowSetup YES` opens the setup sheet, e.g. to capture the Codex connection check.

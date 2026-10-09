@@ -316,7 +316,7 @@ class Index:
             raise RetrievalError(f"range {start}–{end}s is invalid for {seg['original_filename']}; "
                                  f"need 0 <= start < end <= duration ({duration}s)")
         out = {**self._reference(seg), "start": start, "end": min(end, duration), "duration": duration,
-               "index_status": seg["status"], "revision": seg["revision"]}
+               "index_status": live_status(seg), "revision": seg["revision"]}
         if seg["status"] != "ready":
             return {**out, "available": False, "state": seg["status"],
                     "detail": f"Clipcon marks this clip {seg['status']}. {STATUS_NOTES[seg['status']]} "
