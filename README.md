@@ -43,13 +43,24 @@ mkdir -p ~/.clipcon/models ~/.clipcon/logs
 # Multilingual speech (English, Tagalog, Taglish), ~1.6 GB
 curl -L -o ~/.clipcon/models/ggml-large-v3-turbo.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+# Voice activity detection, so silent B-roll gets no invented transcript (~0.9 MB)
+curl -L -o ~/.clipcon/models/ggml-silero-v5.1.2.bin \
+  https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin
 # Local Ollama: loopback only, cloud features disabled
 OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 ollama serve > ~/.clipcon/logs/ollama.log 2>&1 &
 ollama pull qwen3.5:4b-q4_K_M
 (cd worker && uv sync)
 ```
 
-Run the app:
+Day to day, one script starts and stops everything (local-only Ollama, worker dependencies, model warm-up, app build and launch):
+
+```sh
+scripts/clipcon start    # then import footage with ⇧⌘I
+scripts/clipcon status   # Ollama, analysis readiness, app, Codex MCP helpers
+scripts/clipcon stop     # quit the app, unload the model, stop the Ollama the script started
+```
+
+Or run the app from Xcode:
 
 ```sh
 cd app && xcodegen generate && open Clipcon.xcodeproj   # then Run (⌘R)

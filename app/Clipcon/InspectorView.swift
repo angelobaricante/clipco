@@ -31,6 +31,9 @@ struct InspectorView: View {
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            } else if model.selection.count > 1 {
+                ContentUnavailableView("\(model.selection.count) Clips Selected", systemImage: "square.stack",
+                                       description: Text("Select one clip to inspect its context."))
             } else {
                 ContentUnavailableView("No Selection", systemImage: "sidebar.trailing",
                                        description: Text("Select a clip to inspect its context."))
@@ -45,16 +48,19 @@ struct StatusBanner: View {
 
     var body: some View {
         switch clip.status {
-        case .indexing, .pending:
-            Label(model.activity?.stage ?? "Indexing", systemImage: "hourglass")
+        case .indexing:
+            Label(clip.id == model.activity?.clipID ? model.activity?.stage ?? "Indexing" : "Indexing",
+                  systemImage: "hourglass")
                 .foregroundStyle(.secondary)
+        case .pending:
+            Label("Waiting for analysis", systemImage: "clock").foregroundStyle(.secondary)
         case .failed:
             VStack(alignment: .leading, spacing: 8) {
                 Label("Analysis failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(clip.error ?? "Unknown error").font(.callout).textSelection(.enabled)
                 Button("Retry Analysis") {
                     Task {
-                        await model.importClip(URL(filePath: clip.sourcePath), newProjectName: nil,
+                        await model.importFootage([URL(filePath: clip.sourcePath)], newProjectName: nil,
                                                context: model.project?.context ?? "")
                     }
                 }

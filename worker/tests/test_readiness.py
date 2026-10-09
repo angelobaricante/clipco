@@ -39,49 +39,59 @@ def tools_present(name):
 
 def test_unreachable_service_is_reported_with_setup_guidance(tmp_path):
     whisper = tmp_path / "ggml-small.en.bin"
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
     whisper.write_bytes(b"x")
-    r = check(FakeOllama(reachable=False), whisper, which=tools_present)
+    r = check(FakeOllama(reachable=False), whisper, vad, which=tools_present)
     assert r["state"] == "service_unavailable"
     assert "ollama serve" in r["guidance"]
 
 
 def test_missing_vision_or_speech_model_is_reported(tmp_path):
     whisper = tmp_path / "ggml-small.en.bin"
-    r = check(FakeOllama(installed=()), whisper, which=tools_present)
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
+    r = check(FakeOllama(installed=()), whisper, vad, which=tools_present)
     assert r["state"] == "model_missing"
     assert f"ollama pull {MODEL}" in r["guidance"]
 
-    r = check(FakeOllama(), whisper, which=tools_present)
+    r = check(FakeOllama(), whisper, vad, which=tools_present)
     assert r["state"] == "model_missing"
     assert "ggml-small.en.bin" in r["guidance"]
 
 
 def test_missing_media_tools_are_reported(tmp_path):
     whisper = tmp_path / "ggml-small.en.bin"
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
     whisper.write_bytes(b"x")
-    r = check(FakeOllama(), whisper, which=lambda name: None if name == "whisper-cli" else tools_present(name))
+    r = check(FakeOllama(), whisper, vad, which=lambda name: None if name == "whisper-cli" else tools_present(name))
     assert r["state"] == "tools_missing"
     assert "whisper-cli" in r["guidance"]
 
 
 def test_installed_model_is_cold_until_warm_up_reports_loading_then_ready(tmp_path):
     whisper = tmp_path / "ggml-small.en.bin"
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
     whisper.write_bytes(b"x")
     ollama = FakeOllama()
-    assert check(ollama, whisper, which=tools_present)["state"] == "cold"
+    assert check(ollama, whisper, vad, which=tools_present)["state"] == "cold"
 
     seen = []
-    final = warm_up(ollama, whisper, which=tools_present, progress=seen.append)
+    final = warm_up(ollama, whisper, vad, which=tools_present, progress=seen.append)
 
     assert [s["state"] for s in seen] == ["loading"]
     assert final["state"] == "ready"
-    assert check(ollama, whisper, which=tools_present)["state"] == "ready"
+    assert check(ollama, whisper, vad, which=tools_present)["state"] == "ready"
 
 
 def test_failed_warm_up_is_an_inference_failure(tmp_path):
     whisper = tmp_path / "ggml-small.en.bin"
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
     whisper.write_bytes(b"x")
-    final = warm_up(FakeOllama(warm_error=InferenceError("model runner crashed")), whisper,
+    final = warm_up(FakeOllama(warm_error=InferenceError("model runner crashed")), whisper, vad,
                     which=tools_present, progress=lambda s: None)
     assert final["state"] == "inference_failed"
     assert "model runner crashed" in final["detail"]
@@ -91,11 +101,21 @@ def test_non_loopback_or_cloud_inference_is_refused(tmp_path):
     from clipcon_worker.vision import OllamaVision
 
     whisper = tmp_path / "ggml-small.en.bin"
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"x")
     whisper.write_bytes(b"x")
-    remote = check(OllamaVision(MODEL, host="ollama.example.com:11434"), whisper, which=tools_present)
+    remote = check(OllamaVision(MODEL, host="ollama.example.com:11434"), whisper, vad, which=tools_present)
     assert remote["state"] == "service_unavailable"
     assert "loopback" in remote["detail"]
 
-    cloud = check(OllamaVision("gpt-oss:120b-cloud", host="127.0.0.1:1"), whisper, which=tools_present)
+    cloud = check(OllamaVision("gpt-oss:120b-cloud", host="127.0.0.1:1"), whisper, vad, which=tools_present)
     assert cloud["state"] == "service_unavailable"
     assert "cloud" in cloud["detail"]
+
+
+def test_missing_voice_activity_model_is_reported(tmp_path):
+    whisper = tmp_path / "ggml-small.en.bin"
+    whisper.write_bytes(b"x")
+    r = check(FakeOllama(), whisper, tmp_path / "ggml-silero-v5.1.2.bin", which=tools_present)
+    assert r["state"] == "model_missing"
+    assert "ggml-silero-v5.1.2.bin" in r["guidance"] and "whisper-vad" in r["guidance"]

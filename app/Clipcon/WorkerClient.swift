@@ -14,6 +14,13 @@ enum WorkerError: LocalizedError {
     }
 }
 
+/// Lets a cancellation handler stop a worker process; `Process` is thread-safe for `terminate()`.
+private final class RunningProcess: @unchecked Sendable {
+    private let process: Process
+    init(_ process: Process) { self.process = process }
+    func terminate() { if process.isRunning { process.terminate() } }
+}
+
 /// Runs the local Python worker as a subprocess and streams its JSON-lines events.
 /// All process and pipe work happens off the main actor.
 struct WorkerClient: Sendable {
@@ -57,14 +64,21 @@ struct WorkerClient: Sendable {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         var last: WorkerEvent?
-        for try await line in stdout.fileHandleForReading.bytes.lines {
-            guard let event = try? decoder.decode(WorkerEvent.self, from: Data(line.utf8)) else { continue }
-            last = event
-            if event.event == "progress" || event.event == "readiness" {
-                await onEvent(event)
+        // A cancelled caller (e.g. a superseded search) stops its worker instead of leaving it running.
+        let running = RunningProcess(process)
+        try await withTaskCancellationHandler {
+            for try await line in stdout.fileHandleForReading.bytes.lines {
+                guard let event = try? decoder.decode(WorkerEvent.self, from: Data(line.utf8)) else { continue }
+                last = event
+                if event.event == "progress" || event.event == "readiness" {
+                    await onEvent(event)
+                }
             }
+        } onCancel: {
+            running.terminate()
         }
         process.waitUntilExit()
+        try Task.checkCancellation()
         guard let last else { throw WorkerError.noResult }
         if last.event == "error" {
             throw WorkerError.failed(kind: last.kind ?? "Error", message: last.message ?? "Unknown worker error")
@@ -117,6 +131,30 @@ struct WorkerClient: Sendable {
     func snapshot(projectID: String) async throws -> Snapshot {
         guard let s = try await run(["snapshot", "--project", projectID]).snapshot else { throw WorkerError.noResult }
         return s
+    }
+
+    /// Reads the saved index only, so it answers while another worker process is analysing footage.
+    func search(projectID: String, query: String) async throws -> SearchPage {
+        guard let page = try await run(["search", "--project", projectID, "--query", query]).search else {
+            throw WorkerError.noResult
+        }
+        return page
+    }
+
+    /// Forgets clips' saved context and frame cache. The original video files are never touched.
+    func removeClips(projectID: String, clipIDs: [String]) async throws {
+        _ = try await run(["remove-clips", "--project", projectID] + clipIDs)
+    }
+
+    /// Forgets a Project and all its saved context. The original video files are never touched.
+    func deleteProject(projectID: String) async throws {
+        _ = try await run(["delete-project", "--project", projectID])
+    }
+
+    /// Imports chosen video files and every video inside chosen folders into one Project.
+    func importSources(projectID: String, sources: [URL],
+                       onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
+        try await run(["import-sources", "--project", projectID] + sources.map(\.path), onEvent: onProgress)
     }
 
     func importClip(projectID: String, source: URL,

@@ -16,7 +16,7 @@ from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailabl
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
-    "version": 4,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard
+    "version": 5,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role
     "segment_target_seconds": 30.0,
     "silent_segment_seconds": 10.0,
     "frames_per_segment": 2,
@@ -25,6 +25,11 @@ RECIPE = {
 }
 
 Progress = Callable[[str, dict], None]
+
+# Share of a clip's duration that must be speech before it can count as A-roll ("talking most of the time").
+A_ROLL_SPEECH_SHARE = 0.5
+
+VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts"})
 
 
 def new_id(prefix: str) -> str:
@@ -113,6 +118,17 @@ class Worker:
     def snapshot(self, project_id: str) -> dict:
         return self.store.snapshot(project_id)
 
+    def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
+        """Forget clips: their saved context and Clipcon's frame cache. The original video files stay untouched."""
+        self.store.remove_clips(project_id, clip_ids)
+        for clip_id in clip_ids:
+            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+
+    def delete_project(self, project_id: str) -> None:
+        """Forget a Project and all its clips' saved context. The original video files stay untouched."""
+        for clip_id in self.store.delete_project(project_id):
+            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+
     def analysis_key(self, content_fingerprint: str) -> str:
         material = json.dumps({"source": content_fingerprint, "recipe": self.recipe,
                                "speech": self.speech.identity, "vision": self.vision.identity}, sort_keys=True)
@@ -133,11 +149,18 @@ class Worker:
             report(name, {"clip_id": clip_id, **detail})
 
         try:
-            stage("fingerprinting")
             stat = source.stat()
-            content = fingerprint(source)
+            ready = existing is not None and existing["status"] == "ready"
+            if ready and existing["size_bytes"] == stat.st_size and abs(existing["mtime"] - stat.st_mtime) <= 1e-3:
+                # Same size and modification time as when indexed (the check resolve_media applies): trust the
+                # saved content fingerprint instead of rehashing gigabytes, and keep the clip ready meanwhile.
+                report("fingerprinting", {"clip_id": clip_id, "cached": True})
+                content = existing["fingerprint"]
+            else:
+                stage("fingerprinting")
+                content = fingerprint(source)
             key = self.analysis_key(content)
-            if existing and existing["status"] == "ready" and existing["analysis_key"] == key:
+            if ready and existing["analysis_key"] == key:
                 self.store.set_status(clip_id, "ready")
                 report("ready", {"clip_id": clip_id, "reused": True})
                 return {"clip_id": clip_id, "reused": True, "revision": existing["revision"]}
@@ -157,6 +180,44 @@ class Worker:
             self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
             report("failed", {"clip_id": clip_id, "error": str(e)})
             raise
+
+    def import_folder(self, project_id: str, folder: Path, progress: Progress | None = None) -> dict:
+        return self.import_sources(project_id, [folder], progress)
+
+    def import_sources(self, project_id: str, paths: list[Path], progress: Progress | None = None) -> dict:
+        """Register every chosen video file, and every video in chosen folders (and their subfolders, skipping
+        hidden ones), as pending, then index each one. A clip that fails stays failed while the others continue;
+        if the local model service is unavailable, the import stops with that error and the rest stay pending."""
+        report = progress or (lambda stage, detail: None)
+        if self.store.project(project_id) is None:
+            raise ValueError(f"unknown project {project_id}")
+        found: set[Path] = set()
+        for path in (Path(p).expanduser().resolve() for p in paths):
+            if path.is_dir():
+                found |= {p for p in path.rglob("*")
+                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
+            else:
+                found.add(path)
+        # Clips are identified by their resolved original path, as import_clip does, so a linked or twice-chosen
+        # file is one clip.
+        sources = sorted({p.resolve() for p in found if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES})
+        if not sources:
+            raise ValueError("no video files in the chosen items")
+        for source in sources:
+            if not self.store.clip_by_path(project_id, str(source)):
+                clip_id = new_id("clp")
+                self.store.add_clip(clip_id, project_id, str(source), source.name)
+                report("pending", {"clip_id": clip_id, "filename": source.name})
+        for source in sources:
+            try:
+                self.import_clip(project_id, source, progress)
+            except ServiceUnavailable:
+                raise  # no clip can be analysed now; the rest stay pending for a retry
+            except Exception:
+                continue  # recorded on the clip as failed; the rest of the Project carries on
+        clips = [self.store.clip_by_path(project_id, str(s)) for s in sources]
+        return {"clips": [{"clip_id": c["id"], "original_filename": c["original_filename"], "status": c["status"],
+                           "error": c["error"]} for c in clips]}
 
     def _describe(self, request: SegmentRequest, attempts: int = 2):
         """Ask the model for validated context, retrying once when its output fails validation."""
@@ -191,6 +252,7 @@ class Worker:
             if len(planned) * per_segment > recipe["max_frames"]:
                 per_segment = 1
             segments = []
+            facing = 0  # speaking Segments whose frames show a person addressing the camera
             for ordinal, (start, end, group) in enumerate(planned):
                 stage("sampling_frames", segment=ordinal + 1, of=len(planned))
                 frames = []
@@ -211,6 +273,7 @@ class Worker:
                 )
                 stage("describing", segment=ordinal + 1, of=len(planned))
                 desc = self._describe(request)
+                facing += bool(group) and desc.speaker_facing_camera
                 segments.append({
                     "id": new_id("seg"), "ordinal": ordinal, "start": start, "end": end, "label": desc.label,
                     "transcript": transcript, "frames": frames,
@@ -222,8 +285,11 @@ class Worker:
         except BaseException:
             shutil.rmtree(frames_dir, ignore_errors=True)
             raise
+        # A-roll: someone speaks for most of the clip and, in at least half of the speaking Segments, is seen
+        # facing the camera. Speech alone (a voice-over) or a person alone (silent B-roll) is not A-roll.
         speech_seconds = sum(s.end - s.start for s in spans)
-        is_a_roll = speech_seconds >= 0.4 * info.duration
+        speaking = sum(1 for _, _, group in planned if group)
+        is_a_roll = speech_seconds >= A_ROLL_SPEECH_SHARE * info.duration and speaking and facing >= speaking / 2
         return {
             "clip": {
                 "duration": info.duration, "width": info.width, "height": info.height, "fps": info.fps,
@@ -231,7 +297,8 @@ class Worker:
                 "label": segments[0]["label"],
                 "speech_language": language,
                 "role": "a-roll" if is_a_roll else "b-roll",
-                "role_basis": f"speech covers {speech_seconds / info.duration:.0%} of the clip",
+                "role_basis": f"speech covers {speech_seconds / info.duration:.0%} of the clip; a person is "
+                              f"facing the camera in {facing} of {speaking} speaking segments",
             },
             "segments": segments,
         }

@@ -163,3 +163,16 @@ def test_a_repetition_loop_from_speech_recognition_is_collapsed(home, clip):
     [saved] = worker.snapshot(project["id"])["clips"]
     lines = [t["text"] for s in saved["segments"] for t in s["transcript"]]
     assert lines == ["Tapos pipilihin ni ate doon.", "Check.", "Check.", "Wala, nage-handlet dito."]
+
+
+def test_evidence_cited_as_its_prompt_line_is_matched_to_the_supplied_id(home, clip):
+    worker = Worker(home, speech=RecordedSpeech(SPANS), vision=RecordedVision(echo_prompt_lines=True))
+    project = worker.create_project("Tutorial")
+
+    worker.import_clip(project["id"], clip)
+
+    [saved] = worker.snapshot(project["id"])["clips"]
+    assert saved["status"] == "ready"
+    for seg in saved["segments"]:
+        assert seg["observations"] and all(o["frame"]["id"].startswith("frm_") for o in seg["observations"])
+        assert seg["interpretation"]["evidence_ids"] and seg["interpretation"]["rejected_refs"] == []

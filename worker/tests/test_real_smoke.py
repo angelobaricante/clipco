@@ -128,3 +128,22 @@ def test_real_tagalog_speech_is_detected_and_transcribed(tmp_path):
                        for s in saved["segments"] for t in s["transcript"]],
         "interpretations": [s["interpretation"]["text"] for s in saved["segments"]],
     }, indent=2, ensure_ascii=False))
+
+
+def test_room_tone_without_a_voice_produces_no_transcript_and_is_b_roll(tmp_path):
+    footage = tmp_path / "footage"
+    footage.mkdir()
+    clip = footage / "silent-broll.mp4"  # quiet ambient noise, the kind whisper alone invents speech for
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=15",
+                    "-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.02:duration=15",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(clip)], check=True)
+    home = tmp_path / "home"
+    assert worker(home, "warmup")[-1]["readiness"]["state"] == "ready"
+    project = worker(home, "create-project", "--name", "B-roll")[-1]["project"]
+
+    worker(home, "import", "--project", project["id"], str(clip))
+
+    [saved] = worker(home, "snapshot", "--project", project["id"])[-1]["snapshot"]["clips"]
+    assert [t["text"] for s in saved["segments"] for t in s["transcript"]] == []
+    assert saved["role"] == "b-roll"
+    assert saved["analysis"]["speech"]["vad_model"] == "ggml-silero-v5.1.2.bin"

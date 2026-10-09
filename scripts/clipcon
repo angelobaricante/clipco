@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Start, stop, or check everything the Clipcon demo needs on this Mac.
+#
+#   scripts/clipcon start    local-only Ollama, worker deps, warm vision model, build + open the app
+#   scripts/clipcon stop     quit the app, unload the model, stop the Ollama this script started
+#   scripts/clipcon status   show what is running and whether analysis is ready
+#
+# Ollama always runs on loopback with cloud features disabled; this script never uses cloud inference.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE="$HOME/.clipcon"
+LOGS="$STATE/logs"
+RUN="$STATE/run"
+BUILD="$STATE/build"
+OLLAMA_ADDR="127.0.0.1:11434"
+VISION_MODEL="${CLIPCON_VISION_MODEL:-qwen3.5:4b-q4_K_M}"
+WHISPER_MODEL="${CLIPCON_WHISPER_MODEL:-$STATE/models/ggml-large-v3-turbo.bin}"
+VAD_MODEL="${CLIPCON_VAD_MODEL:-$STATE/models/ggml-silero-v5.1.2.bin}"
+BUNDLE_ID="com.angelobaricante.clipcon"
+APP="$BUILD/Build/Products/Debug/Clipcon.app"
+WORKER="$ROOT/worker/.venv/bin/clipcon-worker"
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+mkdir -p "$LOGS" "$RUN"
+
+say() { printf '\033[1m%s\033[0m %s\n' "$1" "${*:2}"; }
+fail() { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
+
+ollama_up() { curl -sf "http://$OLLAMA_ADDR/api/version" >/dev/null 2>&1; }
+ollama_pid() { pgrep -f "ollama serve" | head -1; }
+
+# True when the running Ollama was started with OLLAMA_NO_CLOUD=1 (macOS shows a process's env to its owner).
+ollama_local_only() {
+  local pid; pid="$(ollama_pid)"
+  [[ -n "$pid" ]] && ps eww -p "$pid" | tr ' ' '\n' | grep -qx 'OLLAMA_NO_CLOUD=1'
+}
+
+start_ollama() {
+  if ollama_up; then
+    if ollama_local_only; then
+      say "Ollama" "already running (local-only)"
+    else
+      fail "Ollama is running without OLLAMA_NO_CLOUD=1. Quit it (Ollama menu bar app or 'pkill -f \"ollama serve\"'), then rerun start."
+    fi
+    return
+  fi
+  command -v ollama >/dev/null || fail "Ollama is not installed: brew install ollama"
+  say "Ollama" "starting on $OLLAMA_ADDR (cloud disabled), log: $LOGS/ollama.log"
+  OLLAMA_HOST="$OLLAMA_ADDR" OLLAMA_NO_CLOUD=1 nohup ollama serve >>"$LOGS/ollama.log" 2>&1 &
+  echo $! >"$RUN/ollama.pid"
+  for _ in $(seq 1 30); do ollama_up && return; sleep 0.5; done
+  fail "Ollama did not start; see $LOGS/ollama.log"
+}
+
+check_assets() {
+  for tool in ffmpeg whisper-cli uv xcodebuild; do
+    command -v "$tool" >/dev/null || fail "$tool is missing (see README one-time setup)"
+  done
+  [[ -f "$WHISPER_MODEL" ]] || fail "whisper model missing at $WHISPER_MODEL (see README one-time setup)"
+  [[ -f "$VAD_MODEL" ]] || fail "voice activity model missing at $VAD_MODEL (see README one-time setup)"
+  ollama list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$VISION_MODEL" \
+    || fail "$VISION_MODEL is not downloaded: ollama pull $VISION_MODEL (needs internet once)"
+}
+
+start_worker() {
+  say "Worker" "syncing Python dependencies"
+  (cd "$ROOT/worker" && uv sync --quiet)
+  say "Model" "loading $VISION_MODEL (first load can take a minute)"
+  "$WORKER" warmup | tail -1 | python3 -c 'import json,sys; r=json.loads(sys.stdin.read())["readiness"]; print("      ", r["state"], "-", r["detail"])'
+}
+
+start_app() {
+  if pgrep -f "$APP/Contents/MacOS/Clipcon" >/dev/null; then
+    say "App" "already open"
+    open "$APP"
+    return
+  fi
+  if command -v xcodegen >/dev/null; then (cd "$ROOT/app" && xcodegen generate --quiet); fi
+  say "App" "building (log: $LOGS/build.log)"
+  xcodebuild -project "$ROOT/app/Clipcon.xcodeproj" -scheme Clipcon -configuration Debug \
+    -derivedDataPath "$BUILD" build >"$LOGS/build.log" 2>&1 || fail "build failed; see $LOGS/build.log"
+  say "App" "opening"
+  open "$APP"
+}
+
+stop_all() {
+  if pgrep -f "Clipcon.app/Contents/MacOS/Clipcon" >/dev/null; then
+    say "App" "quitting"
+    osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || pkill -f "Clipcon.app/Contents/MacOS/Clipcon" || true
+  fi
+  if ollama_up; then
+    say "Model" "unloading $VISION_MODEL"
+    ollama stop "$VISION_MODEL" >/dev/null 2>&1 || true
+  fi
+  if [[ -f "$RUN/ollama.pid" ]] && kill -0 "$(cat "$RUN/ollama.pid")" 2>/dev/null; then
+    say "Ollama" "stopping (started by this script)"
+    kill "$(cat "$RUN/ollama.pid")"
+  elif ollama_up; then
+    say "Ollama" "left running (not started by this script)"
+  fi
+  rm -f "$RUN/ollama.pid"
+}
+
+status() {
+  if ollama_up; then
+    say "Ollama" "running $(ollama_local_only && echo '(local-only)' || echo '(WARNING: cloud not disabled)')"
+  else
+    say "Ollama" "not running"
+  fi
+  if [[ -x "$WORKER" ]]; then
+    "$WORKER" readiness | tail -1 | python3 -c 'import json,sys; r=json.loads(sys.stdin.read())["readiness"]; print("\033[1mAnalysis\033[0m", r["state"], "-", r["detail"])'
+  else
+    say "Worker" "not set up (run start)"
+  fi
+  pgrep -f "Clipcon.app/Contents/MacOS/Clipcon" >/dev/null && say "App" "open" || say "App" "closed"
+  local mcp; mcp="$(pgrep -f clipcon-mcp | wc -l | tr -d ' ')"
+  say "Codex MCP" "$mcp helper process(es) running (Codex starts these on demand)"
+}
+
+case "${1:-}" in
+  start) start_ollama; check_assets; start_worker; start_app; say "Ready." "Import footage with ⇧⌘I." ;;
+  stop) stop_all; say "Stopped." ;;
+  status) status ;;
+  *) echo "usage: scripts/clipcon start | stop | status" >&2; exit 2 ;;
+esac

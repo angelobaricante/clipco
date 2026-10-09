@@ -5,6 +5,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from . import relationships
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, context TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
@@ -43,6 +45,12 @@ CREATE TABLE IF NOT EXISTS frames (
 CREATE TABLE IF NOT EXISTS observations (
   frame_id TEXT NOT NULL REFERENCES frames(id), segment_id TEXT NOT NULL REFERENCES segments(id), text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS relationships (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), kind TEXT NOT NULL,
+  a_segment TEXT NOT NULL REFERENCES segments(id), b_segment TEXT NOT NULL REFERENCES segments(id),
+  a_evidence TEXT NOT NULL, b_evidence TEXT NOT NULL, basis TEXT NOT NULL
+);
 """
 
 
@@ -57,6 +65,19 @@ class Store:
         columns = {r["name"] for r in self.db.execute("PRAGMA table_info(source_clips)")}
         if "speech_language" not in columns:  # indexes created before multilingual speech
             self.db.execute("ALTER TABLE source_clips ADD COLUMN speech_language TEXT")
+        derived = self.db.execute("SELECT value FROM meta WHERE key='relationships_version'").fetchone()
+        if derived is None or int(derived[0]) != relationships.VERSION:  # saved before these rules existed
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                for project in self.projects():
+                    self.db.execute("DELETE FROM relationships WHERE project_id=?", (project["id"],))
+                    self._relate(project["id"])
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES ('relationships_version', ?)",
+                                (str(relationships.VERSION),))
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     def create_project(self, project_id: str, name: str, context: str) -> dict:
         self.db.execute("INSERT INTO projects VALUES (?,?,?,?)", (project_id, name, context, time.time()))
@@ -94,6 +115,8 @@ class Store:
         db.execute("BEGIN IMMEDIATE")
         try:
             revision = db.execute("SELECT revision FROM source_clips WHERE id=?", (clip_id,)).fetchone()[0] + 1
+            project_id = db.execute("SELECT project_id FROM source_clips WHERE id=?", (clip_id,)).fetchone()[0]
+            db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
             old = [r[0] for r in db.execute("SELECT id FROM segments WHERE clip_id=?", (clip_id,))]
             for seg_id in old:
                 db.execute("DELETE FROM observations WHERE segment_id=?", (seg_id,))
@@ -119,11 +142,83 @@ class Store:
             db.execute(f"UPDATE source_clips SET {sets}, status='ready', stage=NULL, error=NULL, revision=?,"
                        f" analysis_key=?, updated_at=? WHERE id=?",
                        (*clip_fields.values(), revision, analysis["key"], time.time(), clip_id))
+            self._relate(project_id)
             db.execute("COMMIT")
             return revision
         except BaseException:
             db.execute("ROLLBACK")
             raise
+
+    def _delete_clip(self, clip_id: str) -> None:
+        """Delete one clip's saved context rows (inside a caller's transaction)."""
+        db = self.db
+        for (seg_id,) in db.execute("SELECT id FROM segments WHERE clip_id=?", (clip_id,)).fetchall():
+            db.execute("DELETE FROM observations WHERE segment_id=?", (seg_id,))
+            db.execute("DELETE FROM frames WHERE segment_id=?", (seg_id,))
+            db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
+        db.execute("DELETE FROM segments WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM analyses WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM source_clips WHERE id=?", (clip_id,))
+
+    def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
+        """Remove clips and their saved context from a Project in one transaction; relationships are re-derived
+        from what remains. Original files are not touched."""
+        db = self.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for clip_id in clip_ids:
+                if not db.execute("SELECT 1 FROM source_clips WHERE id=? AND project_id=?",
+                                  (clip_id, project_id)).fetchone():
+                    raise ValueError(f"clip {clip_id} is not in project {project_id}")
+            db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
+            for clip_id in clip_ids:
+                self._delete_clip(clip_id)
+            self._relate(project_id)
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+
+    def delete_project(self, project_id: str) -> list[str]:
+        """Delete a Project and all its saved context in one transaction; returns the removed clip IDs."""
+        db = self.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            if not self.project(project_id):
+                raise ValueError(f"unknown project {project_id}")
+            clip_ids = [r[0] for r in db.execute("SELECT id FROM source_clips WHERE project_id=?", (project_id,))]
+            db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
+            for clip_id in clip_ids:
+                self._delete_clip(clip_id)
+            db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+            db.execute("COMMIT")
+            return clip_ids
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+
+    def _relate(self, project_id: str) -> None:
+        """Re-derive the Project's suggested relationships from its published Segments (inside publish's
+        transaction, so readers never see relationships that disagree with the Segments they cite)."""
+        db = self.db
+        segments = []
+        for s in db.execute("SELECT s.id, s.clip_id, s.start, s.end_, s.label, c.role FROM segments s"
+                            " JOIN source_clips c ON c.id = s.clip_id WHERE c.project_id=?"
+                            " ORDER BY c.created_at, s.ordinal", (project_id,)).fetchall():
+            segments.append({
+                "id": s["id"], "clip_id": s["clip_id"], "start": s["start"], "end": s["end_"], "label": s["label"],
+                "role": s["role"],
+                "transcript": [{"id": t["id"], "start": t["start"], "end": t["end_"], "text": t["text"]}
+                               for t in db.execute("SELECT * FROM transcript_spans WHERE segment_id=?"
+                                                   " ORDER BY ordinal", (s["id"],))],
+                "observations": [{"id": o["frame_id"], "text": o["text"]}
+                                 for o in db.execute("SELECT * FROM observations WHERE segment_id=?"
+                                                     " ORDER BY rowid", (s["id"],))],
+            })
+        for r in relationships.relate(segments):
+            db.execute("INSERT INTO relationships VALUES (?,?,?,?,?,?,?,?)", (
+                r["id"], project_id, r["kind"], r["a_segment"], r["b_segment"],
+                json.dumps(r["a_evidence"]), json.dumps(r["b_evidence"]), r["basis"]))
 
     def snapshot(self, project_id: str) -> dict:
         db = self.db

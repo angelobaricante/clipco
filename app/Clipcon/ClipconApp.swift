@@ -18,7 +18,7 @@ struct ClipconApp: App {
         }
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Import Source Clip…") { model.showImport = true }
+                Button("Import Footage…") { model.showImport = true }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
             }
             CommandGroup(after: .sidebar) {

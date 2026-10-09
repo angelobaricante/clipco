@@ -13,7 +13,7 @@ from .vision import InferenceError, ServiceUnavailable
 TOOLS = ("ffmpeg", "ffprobe", "whisper-cli")
 
 
-def check(ollama, whisper_model: Path, which: Callable = shutil.which) -> dict:
+def check(ollama, whisper_model: Path, vad_model: Path, which: Callable = shutil.which) -> dict:
     base = {"vision_model": ollama.model, "speech_model": str(whisper_model)}
     missing = [t for t in TOOLS if not which(t)]
     if missing:
@@ -37,15 +37,19 @@ def check(ollama, whisper_model: Path, which: Callable = shutil.which) -> dict:
         return {**base, "state": "model_missing", "detail": f"Speech model not found at {whisper_model}",
                 "guidance": f"While online, download {Path(whisper_model).name} from "
                             f"https://huggingface.co/ggerganov/whisper.cpp to {whisper_model}"}
+    if not Path(vad_model).exists():
+        return {**base, "state": "model_missing", "detail": f"Voice activity model not found at {vad_model}",
+                "guidance": f"While online, download {Path(vad_model).name} from "
+                            f"https://huggingface.co/ggml-org/whisper-vad to {vad_model}"}
     if ollama.model in loaded:
         return {**base, "state": "ready", "detail": f"{ollama.model} is loaded", "guidance": ""}
     return {**base, "state": "cold", "detail": f"{ollama.model} is installed but not loaded",
             "guidance": "Load the model before analysis; the first load can take a minute."}
 
 
-def warm_up(ollama, whisper_model: Path, which: Callable = shutil.which,
+def warm_up(ollama, whisper_model: Path, vad_model: Path, which: Callable = shutil.which,
             progress: Callable[[dict], None] = lambda s: None) -> dict:
-    current = check(ollama, whisper_model, which)
+    current = check(ollama, whisper_model, vad_model, which)
     if current["state"] != "cold":
         return current
     progress({**current, "state": "loading", "detail": f"Loading {ollama.model}…", "guidance": ""})
@@ -54,4 +58,4 @@ def warm_up(ollama, whisper_model: Path, which: Callable = shutil.which,
     except InferenceError as e:
         return {**current, "state": "inference_failed", "detail": str(e),
                 "guidance": "Check ~/.clipcon/logs/ollama.log or restart Ollama, then retry."}
-    return check(ollama, whisper_model, which)
+    return check(ollama, whisper_model, vad_model, which)
