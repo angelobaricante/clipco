@@ -11,7 +11,13 @@ struct ContentView: View {
         } detail: {
             BrowserView()
                 .navigationTitle(model.project?.name ?? "Clipcon")
-                .navigationSubtitle(model.filter.rawValue)
+                .navigationSubtitle(model.trimmedQuery.isEmpty ? model.filter.rawValue : "Search")
+                .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search footage context")
+                .task(id: model.searchText) {
+                    try? await Task.sleep(for: .milliseconds(250))  // debounce typing
+                    guard !Task.isCancelled else { return }
+                    await model.search()
+                }
         }
         .inspector(isPresented: $model.showInspector) {
             InspectorView()
@@ -20,7 +26,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Import", systemImage: "square.and.arrow.down") { model.showImport = true }
-                    .help("Import a source clip (⇧⌘I)")
+                    .help("Import a footage folder or source clip (⇧⌘I)")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("Inspector", systemImage: "sidebar.trailing") { model.showInspector.toggle() }

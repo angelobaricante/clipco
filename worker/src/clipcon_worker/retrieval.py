@@ -2,11 +2,13 @@
 
 import json
 import os
-import re
+from collections import Counter
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+from .text import matches, terms, words
 
 DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipcon"
 
@@ -23,12 +25,14 @@ PREVIEW_WIDTH_MAX = 512
 SEARCH_PAGE_MAX = 10
 EXCERPT_CHARS = 240
 
-# Words that carry no footage meaning in English or Tagalog/Taglish queries.
-STOPWORDS = frozenset("""
-a an and are as at be but by do for from has have i in is it its me my of on or our so that the their them then
-there these they this to was we were what when where which who will with you your
-ang ng mga sa na at ay ito iyan yan yung iyong lang pa po ko mo niya nila namin natin si ni kay
-""".split())
+# What the other Segment of a relationship is, seen from its first (a) and second (b) Segment; listed in the
+# order relationships are shown.
+RELATED_AS = {"spoken_correction": ("correction", "earlier_statement"),
+              "repeated_take": ("other_take", "other_take"),
+              "supporting_broll": ("suggested_broll", "a_roll_explanation")}
+# A relationship whose two sides fall in the same Segment is reported once as "within_segment".
+RELATIONSHIPS_PER_RESULT = 3
+RELATIONSHIPS_PER_CONTEXT = 10
 
 # Evidence kinds a match can rest on, and how strongly each counts toward relevance.
 WEIGHTS = {"transcript": 3.0, "label": 2.0, "interpretation": 2.0, "observation": 1.5}
@@ -38,22 +42,6 @@ SUPPORTING_WEIGHT = 0.25
 
 class RetrievalError(Exception):
     """A request the index cannot answer truthfully; reported to the agent as a tool error."""
-
-
-def words(text: str) -> list[str]:
-    return re.findall(r"\w+", text.casefold())
-
-
-def terms(text: str) -> list[str]:
-    """Meaningful query words; a query made only of stopwords keeps them rather than matching nothing."""
-    every = words(text)
-    return [w for w in every if w not in STOPWORDS] or every
-
-
-def matches(term: str, words: set[str]) -> bool:
-    """Exact word, or one word extending the other for longer words ("filter" matches "filters")."""
-    return term in words or (len(term) >= 4 and any(w.startswith(term) or (len(w) >= 4 and term.startswith(w))
-                                                    for w in words))
 
 
 def clip_text(text: str) -> str:
@@ -112,9 +100,11 @@ class Index:
                 " FROM source_clips c WHERE c.project_id=? ORDER BY c.created_at", (project_id,)).fetchall()
         return {
             "project": {"project_id": project["id"], "name": project["name"], "context": project["context"]},
+            "status_counts": dict(Counter(c["status"] for c in clips)),
             "clips": [{
                 "clip_id": c["id"], "original_filename": c["original_filename"], "label": c["label"],
-                "role": c["role"], "status": c["status"], "error": c["error"], "duration": c["duration"],
+                "role": c["role"], "status": c["status"], "stage": c["stage"], "error": c["error"],
+                "duration": c["duration"],
                 "speech_language": c["speech_language"], "segment_count": c["segment_count"],
                 "revision": c["revision"],
             } for c in clips],
@@ -136,6 +126,42 @@ class Index:
                 "original_filename": seg["original_filename"], "label": seg["label"],
                 "start": seg["start"], "end": seg["end_"]}
 
+    @staticmethod
+    def _evidence(db: sqlite3.Connection, ids: list[str]) -> list[dict]:
+        """Resolve cited transcript/frame IDs to their timestamped saved text."""
+        out = []
+        for eid in ids:
+            if t := db.execute("SELECT * FROM transcript_spans WHERE id=?", (eid,)).fetchone():
+                out.append({"transcript_id": eid, "segment_id": t["segment_id"], "start": t["start"],
+                            "end": t["end_"], "text": t["text"]})
+            elif o := db.execute("SELECT o.segment_id, o.text, f.time FROM observations o JOIN frames f"
+                                 " ON f.id = o.frame_id WHERE o.frame_id=?", (eid,)).fetchone():
+                out.append({"frame_id": eid, "segment_id": o["segment_id"], "time": o["time"], "text": o["text"]})
+        return out
+
+    def _relationships(self, db: sqlite3.Connection, segment_id: str, limit: int, full: bool) -> list[dict]:
+        """Suggested relationships touching a Segment, each naming the other Segment and what it is."""
+        rows = db.execute("SELECT * FROM relationships WHERE a_segment=? OR b_segment=? ORDER BY rowid",
+                          (segment_id, segment_id)).fetchall()
+        rows.sort(key=lambda r: list(RELATED_AS).index(r["kind"]))  # corrections, then takes, then B-roll
+        out = []
+        for r in rows:
+            if r["a_segment"] == r["b_segment"]:  # both statements or takes fall within this Segment
+                other, related_as, cited = "a", "within_segment", json.loads(r["a_evidence"]) + json.loads(r["b_evidence"])
+            elif r["a_segment"] == segment_id:
+                other, related_as, cited = "b", RELATED_AS[r["kind"]][0], json.loads(r["b_evidence"])
+            else:
+                other, related_as, cited = "a", RELATED_AS[r["kind"]][1], json.loads(r["a_evidence"])
+            seg = self._segment(db, r[f"{other}_segment"])
+            excerpt = " ".join(dict.fromkeys(e["text"] for e in self._evidence(db, cited)))
+            item = {"relationship_id": r["id"], "kind": r["kind"], "related_as": related_as,
+                    **{k: v for k, v in self._reference(seg).items() if k != "project_id"},
+                    "excerpt": clip_text(excerpt), "basis": r["basis"], "suggested": True}
+            if full:
+                item["evidence"] = self._evidence(db, json.loads(r["a_evidence"]) + json.loads(r["b_evidence"]))
+            out.append(item)
+        return out[:limit]
+
     def segment_context(self, segment_id: str, window_seconds: float = 15.0) -> dict:
         """One Segment's evidence plus transcript up to window_seconds either side, kept distinct by kind."""
         window = max(0.0, min(window_seconds, CONTEXT_WINDOW_MAX))
@@ -151,6 +177,7 @@ class Index:
                 " WHERE o.segment_id=? ORDER BY f.time", (seg["id"],)).fetchall()
             analysis = db.execute("SELECT * FROM analyses WHERE clip_id=? AND revision=?",
                                   (seg["clip_id"], seg["revision"])).fetchone()
+            relationships = self._relationships(db, seg["id"], RELATIONSHIPS_PER_CONTEXT, full=True)
         speech = json.loads(analysis["speech_identity"]) if analysis else {}
         vision = json.loads(analysis["vision_identity"]) if analysis else {}
         omitted = max(0, len(spans) - CONTEXT_LINES_MAX)
@@ -177,8 +204,11 @@ class Index:
                 "recipe_version": json.loads(analysis["recipe"]).get("version") if analysis else None,
                 "analyzed_at": analysis["finished_at"] if analysis else None,
             },
-            # Creator notes and Spoken correction/Repeated take relationships are not indexed yet.
-            "not_yet_available": ["creator_notes", "relationships"],
+            "relationships": relationships,
+            "relationships_note": "Suggestions derived from saved evidence. Both sides stay in the index; "
+                                  "none is marked preferred. The creator decides which statement or take to use.",
+            # Creator notes are not indexed yet.
+            "not_yet_available": ["creator_notes"],
         }
 
     def preview(self, segment_id: str, frame_id: str | None = None) -> tuple[dict, bytes]:
@@ -248,8 +278,6 @@ class Index:
         """Rank Segments by query terms found in their saved evidence; return one bounded page."""
         limit = max(1, min(limit, SEARCH_PAGE_MAX))
         offset = max(0, offset)
-        wanted = terms(query)
-        phrase = f" {' '.join(words(query))} "
         with self._connect() as db:
             self._project(db, project_id)
             segments = db.execute(
@@ -264,21 +292,10 @@ class Index:
                     "SELECT text FROM observations WHERE segment_id=? ORDER BY rowid", (seg["id"],))]
                 items += [("interpretation", seg["interpretation"]), ("label", seg["label"])]
                 evidence[seg["id"]] = items
-        ranked = []
-        for seg in segments if wanted else []:
-            scored = []
-            for kind, text in evidence[seg["id"]]:
-                found = words(text)
-                hits = sum(1 for t in wanted if matches(t, set(found)))
-                if hits:
-                    exact = phrase.strip() and phrase in f" {' '.join(found)} "
-                    scored.append((WEIGHTS[kind] * hits + (2.0 * len(wanted) if exact else 0), kind, text))
-            if scored:
-                scored.sort(key=lambda s: -s[0])
-                score = scored[0][0] + SUPPORTING_WEIGHT * sum(s[0] for s in scored[1:])
-                ranked.append((score, seg, scored[0]))
-        ranked.sort(key=lambda r: -r[0])  # stable: equal scores keep source order
-        page = ranked[offset:offset + limit]
+            ranked = rank(query, segments, evidence)
+            page = ranked[offset:offset + limit]
+            related = {seg["id"]: self._relationships(db, seg["id"], RELATIONSHIPS_PER_RESULT, full=False)
+                       for _, seg, _ in page}
         more = offset + limit < len(ranked)
         return {
             "query": query, "project_id": project_id, "total_matches": len(ranked),
@@ -286,5 +303,27 @@ class Index:
             "results": [{
                 **self._reference(seg), "excerpt": clip_text(text), "evidence_basis": kind,
                 "status": seg["status"], "revision": seg["revision"], "score": round(score, 2),
+                "relationships": related[seg["id"]],
             } for score, seg, (_, kind, text) in page],
         }
+
+
+def rank(query: str, segments: list, evidence: dict[str, list[tuple[str, str]]]) -> list[tuple]:
+    """(score, segment, best matching (score, kind, text)) for every Segment with evidence matching the query."""
+    wanted = terms(query)
+    phrase = f" {' '.join(words(query))} "
+    ranked = []
+    for seg in segments if wanted else []:
+        scored = []
+        for kind, text in evidence[seg["id"]]:
+            found = words(text)
+            hits = sum(1 for t in wanted if matches(t, set(found)))
+            if hits:
+                exact = phrase.strip() and phrase in f" {' '.join(found)} "
+                scored.append((WEIGHTS[kind] * hits + (2.0 * len(wanted) if exact else 0), kind, text))
+        if scored:
+            scored.sort(key=lambda s: -s[0])
+            score = scored[0][0] + SUPPORTING_WEIGHT * sum(s[0] for s in scored[1:])
+            ranked.append((score, seg, scored[0]))
+    ranked.sort(key=lambda r: -r[0])  # stable: equal scores keep source order
+    return ranked

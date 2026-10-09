@@ -26,6 +26,8 @@ RECIPE = {
 
 Progress = Callable[[str, dict], None]
 
+VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts"})
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
@@ -133,11 +135,18 @@ class Worker:
             report(name, {"clip_id": clip_id, **detail})
 
         try:
-            stage("fingerprinting")
             stat = source.stat()
-            content = fingerprint(source)
+            ready = existing is not None and existing["status"] == "ready"
+            if ready and existing["size_bytes"] == stat.st_size and abs(existing["mtime"] - stat.st_mtime) <= 1e-3:
+                # Same size and modification time as when indexed (the check resolve_media applies): trust the
+                # saved content fingerprint instead of rehashing gigabytes, and keep the clip ready meanwhile.
+                report("fingerprinting", {"clip_id": clip_id, "cached": True})
+                content = existing["fingerprint"]
+            else:
+                stage("fingerprinting")
+                content = fingerprint(source)
             key = self.analysis_key(content)
-            if existing and existing["status"] == "ready" and existing["analysis_key"] == key:
+            if ready and existing["analysis_key"] == key:
                 self.store.set_status(clip_id, "ready")
                 report("ready", {"clip_id": clip_id, "reused": True})
                 return {"clip_id": clip_id, "reused": True, "revision": existing["revision"]}
@@ -157,6 +166,36 @@ class Worker:
             self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
             report("failed", {"clip_id": clip_id, "error": str(e)})
             raise
+
+    def import_folder(self, project_id: str, folder: Path, progress: Progress | None = None) -> dict:
+        """Register every video file in a folder (and its subfolders, skipping hidden ones) as pending, then index
+        each one. A clip that fails stays failed while the others continue; if the local model service is
+        unavailable, the import stops with that error and the remaining clips stay pending."""
+        report = progress or (lambda stage, detail: None)
+        folder = Path(folder).expanduser().resolve()
+        if self.store.project(project_id) is None:
+            raise ValueError(f"unknown project {project_id}")
+        # Clips are identified by their resolved original path, as import_clip does, so a linked file is one clip.
+        sources = sorted({p.resolve() for p in folder.rglob("*")
+                          if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES
+                          and not any(part.startswith(".") for part in p.relative_to(folder).parts)})
+        if not sources:
+            raise ValueError(f"no video files in {folder}")
+        for source in sources:
+            if not self.store.clip_by_path(project_id, str(source)):
+                clip_id = new_id("clp")
+                self.store.add_clip(clip_id, project_id, str(source), source.name)
+                report("pending", {"clip_id": clip_id, "filename": source.name})
+        for source in sources:
+            try:
+                self.import_clip(project_id, source, progress)
+            except ServiceUnavailable:
+                raise  # no clip can be analysed now; the rest stay pending for a retry
+            except Exception:
+                continue  # recorded on the clip as failed; the rest of the Project carries on
+        clips = [self.store.clip_by_path(project_id, str(s)) for s in sources]
+        return {"clips": [{"clip_id": c["id"], "original_filename": c["original_filename"], "status": c["status"],
+                           "error": c["error"]} for c in clips]}
 
     def _describe(self, request: SegmentRequest, attempts: int = 2):
         """Ask the model for validated context, retrying once when its output fails validation."""

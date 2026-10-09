@@ -30,11 +30,12 @@ struct ImportSheet: View {
                     LabeledContent("Context", value: project.context)
                 }
             }
-            Section("Source clip") {
-                LabeledContent(source?.lastPathComponent ?? "No clip chosen") {
+            Section("Footage") {
+                LabeledContent(source?.lastPathComponent ?? "No folder or clip chosen") {
                     Button("Choose…") { choosing = true }
                 }
-                Text("The original file is only read. Analysis runs locally with whisper.cpp and Ollama.")
+                Text("Choose a folder to import every video in it, or a single clip. Originals are only read. "
+                     + "Analysis runs locally with whisper.cpp and Ollama.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let r = model.readiness, !model.canAnalyze {
@@ -46,7 +47,7 @@ struct ImportSheet: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .fileImporter(isPresented: $choosing, allowedContentTypes: [.movie]) { result in
+        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie]) { result in
             if case .success(let url) = result { source = url }
         }
         .toolbar {

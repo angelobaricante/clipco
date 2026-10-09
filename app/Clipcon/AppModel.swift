@@ -26,6 +26,8 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
 struct ImportActivity: Equatable {
     var filename: String
     var stage: String
+    /// The Source clip currently being analysed, once the worker has registered it.
+    var clipID: String?
 }
 
 /// Single observable UI state: selection, filter, inspector visibility, and the displayed index snapshot.
@@ -49,6 +51,14 @@ final class AppModel {
     var isCheckingMcp = false
     var activity: ImportActivity?
     var errorMessage: String?
+    var searchText = ""
+    var searchResults: SearchPage?
+    var isSearching = false
+    /// The selected search result (a Segment); its Source clip is also the browser selection.
+    var selectedHit: SearchHit.ID?
+    private var reloadGeneration = 0
+
+    var trimmedQuery: String { searchText.trimmingCharacters(in: .whitespaces) }
 
     var visibleClips: [SourceClip] { clips.filter(filter.includes) }
     var selectedClip: SourceClip? { clips.first { $0.id == selection } }
@@ -112,12 +122,36 @@ final class AppModel {
 
     func reload() async throws {
         guard let project else { return }
+        reloadGeneration += 1
+        let generation = reloadGeneration
         let snapshot = try await worker.snapshot(projectID: project.id)
+        guard generation == reloadGeneration else { return }  // a newer reload is already on its way
         clips = snapshot.clips
         if selection == nil || selectedClip == nil { selection = clips.first?.id }
     }
 
-    /// Creates a Project when needed, then indexes one source clip while the UI stays interactive.
+    /// Searches the saved index in a separate worker process: no model starts, and it answers while
+    /// another clip is still being analysed.
+    func search() async {
+        let query = trimmedQuery
+        guard let project, !query.isEmpty else {
+            searchResults = nil
+            return
+        }
+        isSearching = true
+        defer { if query == trimmedQuery { isSearching = false } }
+        do {
+            let page = try await worker.search(projectID: project.id, query: query)
+            if page.query == trimmedQuery { searchResults = page }
+        } catch is CancellationError {
+            // Superseded by newer typing; its worker process was stopped.
+        } catch {
+            errorMessage = "Search failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Creates a Project when needed, then indexes one Source clip, or every video in a folder, while the
+    /// UI stays interactive. Completed clips are reviewable while the rest are still being analysed.
     func importClip(_ url: URL, newProjectName: String?, context: String) async {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -138,19 +172,19 @@ final class AppModel {
                 try await open(created)
             }
             guard let project else { return }
-            let result = try await worker.importClip(projectID: project.id, source: url) { [weak self] event in
-                await MainActor.run {
-                    guard let self else { return }
-                    self.activity?.stage = Self.describe(event)
-                    // Show the clip (status: indexing) as soon as the worker has registered it.
-                    if let clipID = event.clipId, self.selection != clipID {
-                        self.selection = clipID
-                        Task { try? await self.reload() }
-                    }
-                }
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
+                await MainActor.run { self?.track(event) }
             }
-            try await reload()
-            selection = result.clipId
+            if isFolder {
+                _ = try await worker.importFolder(projectID: project.id, folder: url, onProgress: onProgress)
+                try await reload()
+            } else {
+                let result = try await worker.importClip(projectID: project.id, source: url, onProgress: onProgress)
+                try await reload()
+                selection = result.clipId
+            }
+            if !trimmedQuery.isEmpty { await search() }
         } catch {
             errorMessage = error.localizedDescription
             if case WorkerError.failed(let kind, let message) = error,
@@ -160,6 +194,25 @@ final class AppModel {
             }
             try? await reload()
         }
+    }
+
+    /// Follows worker progress: shows newly registered clips, the live stage of the one being analysed,
+    /// and each clip's final state as soon as it is published.
+    private func track(_ event: WorkerEvent) {
+        if event.stage == "pending" {
+            activity?.stage = "Found \(event.filename ?? "clip")"
+            if !clips.contains(where: { $0.id == event.clipId }) { Task { try? await reload() } }
+            return
+        }
+        activity?.stage = Self.describe(event)
+        guard let clipID = event.clipId else { return }
+        if activity?.clipID != clipID {
+            if let name = clips.first(where: { $0.id == clipID })?.originalFilename { activity?.filename = name }
+            activity?.clipID = clipID
+            if selection == nil || clips.allSatisfy({ $0.id != clipID }) { selection = clipID }
+            Task { try? await reload() }
+        }
+        if event.stage == "ready" || event.stage == "failed" { Task { try? await reload() } }
     }
 
     nonisolated static func describe(_ event: WorkerEvent) -> String {

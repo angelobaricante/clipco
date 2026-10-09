@@ -45,9 +45,12 @@ struct StatusBanner: View {
 
     var body: some View {
         switch clip.status {
-        case .indexing, .pending:
-            Label(model.activity?.stage ?? "Indexing", systemImage: "hourglass")
+        case .indexing:
+            Label(clip.id == model.activity?.clipID ? model.activity?.stage ?? "Indexing" : "Indexing",
+                  systemImage: "hourglass")
                 .foregroundStyle(.secondary)
+        case .pending:
+            Label("Waiting for analysis", systemImage: "clock").foregroundStyle(.secondary)
         case .failed:
             VStack(alignment: .leading, spacing: 8) {
                 Label("Analysis failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)

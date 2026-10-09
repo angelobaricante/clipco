@@ -7,14 +7,15 @@ import pytest
 from clipcon_worker.speech import Transcript, TranscriptSpan
 
 
-def make_clip(path: Path, seconds: float = 12.0) -> Path:
-    """Render a small real video file (test pattern + tone) with FFmpeg."""
+def make_clip(path: Path, seconds: float = 12.0, audio: bool = True) -> Path:
+    """Render a small real video file (test pattern, plus a tone when audio is wanted) with FFmpeg."""
+    tone = ["-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}", "-c:a", "aac", "-shortest"]
     subprocess.run(
         [
             "ffmpeg", "-v", "error", "-y",
             "-f", "lavfi", "-i", f"testsrc2=size=320x240:rate=24:duration={seconds}",
-            "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            *(tone if audio else []),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
             str(path),
         ],
         check=True,
@@ -40,6 +41,47 @@ class RecordedSpeech:
         self.calls += 1
         assert wav_path.exists()
         return Transcript(list(self.spans), self.language)
+
+
+class ScriptedSpeech:
+    """Replays one transcript per transcribed clip, in import order (clips without audio are skipped)."""
+
+    identity = {"engine": "scripted-speech", "model": "fixture"}
+
+    def __init__(self, *scripts: list[TranscriptSpan]):
+        self.scripts = list(scripts)
+        self.calls = 0
+
+    def transcribe(self, wav_path: Path):
+        self.calls += 1
+        return Transcript(list(self.scripts[(self.calls - 1) % len(self.scripts)]), "en")
+
+
+class ScriptedVision:
+    """Describes each clip's sampled frames with the text scripted for its filename; can fail named clips."""
+
+    identity = {"engine": "scripted-vision", "model": "fixture"}
+
+    def __init__(self, scripts: dict[str, str], fail: set[str] = frozenset()):
+        self.scripts = scripts
+        self.fail = set(fail)
+        self.calls = 0
+        self.on_describe = lambda request: None
+
+    def describe(self, request):
+        from clipcon_worker.vision import InferenceError
+
+        self.calls += 1
+        self.on_describe(request)
+        if request.original_filename in self.fail:
+            raise InferenceError(f"recorded failure for {request.original_filename}")
+        seen = self.scripts.get(request.original_filename, "A test pattern.")
+        return {
+            "label": seen.split(".")[0][:60],
+            "observations": [{"frame_id": f.id, "text": seen} for f in request.frames],
+            "interpretation": seen,
+            "evidence_ids": [t.id for t in request.transcript] + [f.id for f in request.frames],
+        }
 
 
 class RecordedVision:

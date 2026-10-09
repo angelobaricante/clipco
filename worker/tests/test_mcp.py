@@ -150,8 +150,11 @@ def test_segment_context_expands_surrounding_transcript_with_evidence_kinds_and_
     assert ctx["provenance"]["speech"]["model"] == "fixture" and ctx["provenance"]["vision"]["model"] == "fixture"
     assert ctx["provenance"]["recipe_version"] == RECIPE["version"]
     assert ctx["provenance"]["speech_language"] == "en"
-    assert set(ctx["not_yet_available"]) == {"creator_notes", "relationships"}  # absent, not "none exist"
-    assert "creator_notes" not in ctx and "relationships" not in ctx
+    assert ctx["not_yet_available"] == ["creator_notes"]  # absent, not "none exist"
+    assert "creator_notes" not in ctx
+    [correction] = ctx["relationships"]
+    assert (correction["kind"], correction["related_as"]) == ("spoken_correction", "earlier_statement")
+    assert correction["excerpt"] == "First, fill the upper chamber."
 
 
 def test_unknown_references_are_reported_not_invented(home, clip):

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .pipeline import Worker
 from .readiness import check, warm_up
-from .retrieval import default_home
+from .retrieval import SEARCH_PAGE, Index, default_home
 from .speech import WhisperCppSpeech
 from .vision import OllamaVision
 
@@ -45,8 +45,16 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("import")
     p.add_argument("--project", required=True)
     p.add_argument("source", type=Path)
+    p = sub.add_parser("import-folder")
+    p.add_argument("--project", required=True)
+    p.add_argument("source", type=Path, metavar="folder")
     p = sub.add_parser("snapshot")
     p.add_argument("--project", required=True)
+    p = sub.add_parser("search", help="search the saved index (reads only; starts no model)")
+    p.add_argument("--project", required=True)
+    p.add_argument("--query", required=True)
+    p.add_argument("--limit", type=int, default=SEARCH_PAGE)
+    p.add_argument("--offset", type=int, default=0)
     args = parser.parse_args(argv)
 
     ollama = OllamaVision(args.vision_model)
@@ -54,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "mcp-status":
             from .mcp_check import connection_status
             emit("result", mcp=connection_status(args.home))
+        elif args.command == "search":
+            emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset))
         elif args.command == "readiness":
             emit("result", readiness=check(ollama, args.whisper_model))
         elif args.command == "warmup":
@@ -67,11 +77,11 @@ def main(argv: list[str] | None = None) -> int:
                 emit("result", project=worker.create_project(args.name, args.context))
             elif args.command == "snapshot":
                 emit("result", snapshot=worker.snapshot(args.project))
-            elif args.command == "import":
+            elif args.command in ("import", "import-folder"):
                 started = time.monotonic()
-                outcome = worker.import_clip(
-                    args.project, args.source,
-                    progress=lambda stage, detail: emit("progress", stage=stage, **detail))
+                run = worker.import_clip if args.command == "import" else worker.import_folder
+                outcome = run(args.project, args.source,
+                              progress=lambda stage, detail: emit("progress", stage=stage, **detail))
                 emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))
     except Exception as e:  # reported to the app as a structured, displayable error
         print(f"clipcon-worker: {type(e).__name__}: {e}", file=sys.stderr)

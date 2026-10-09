@@ -14,6 +14,7 @@ final class ProbeState {
 ///
 ///   open Clipcon.app --args -ClipconAutomationImport /path/clip.mp4 \
 ///     -ClipconAutomationProject "Name" -ClipconAutomationContext "..." -ClipconAutomationOut /tmp/out
+///     [-ClipconAutomationSearch "query"]   (the import path may also be a folder)
 @MainActor
 enum AutomationRun {
     static func runIfRequested(_ model: AppModel) async {
@@ -27,6 +28,7 @@ enum AutomationRun {
         var report: [String: Any] = ["source": path]
         let started = Date()
         let state = ProbeState()
+        var searchReport: [String: Any] = [:]
 
         // Main-thread responsiveness probe: a 50 ms tick that records its worst lateness.
         let probe = Task { @MainActor in
@@ -54,6 +56,18 @@ enum AutomationRun {
             try? await Task.sleep(for: .milliseconds(300))
             model.showInspector.toggle()
             model.filter = .all
+            // Search the saved index while analysis is still running (`-ClipconAutomationSearch "query"`).
+            guard let query = defaults.string(forKey: "ClipconAutomationSearch") else { return }
+            while model.activity != nil && !model.clips.contains(where: { $0.status == .ready }) {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            let asked = Date()
+            model.searchText = query
+            await model.search()
+            searchReport = ["query": query, "seconds": Date().timeIntervalSince(asked),
+                            "while_importing": model.activity != nil,
+                            "results": model.searchResults?.results.map { "\($0.originalFilename) \($0.start)–\($0.end)" }
+                                ?? []]
         }
 
         await model.importClip(URL(filePath: path),
@@ -64,6 +78,7 @@ enum AutomationRun {
         _ = await (probe.value, stageWatch.value, interaction.value)
         report["worst_main_thread_stall_ms"] = (state.worstStall * 1000).rounded()
         report["stages"] = state.stages
+        report["search_during_import"] = searchReport
         report["error"] = model.errorMessage
         if let clip = model.selectedClip {
             report["clip_id"] = clip.id

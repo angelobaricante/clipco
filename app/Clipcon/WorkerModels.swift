@@ -139,6 +139,66 @@ struct McpStatus: Decodable, Equatable, Sendable {
     var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }
 }
 
+/// One page of saved-index search results; the same payload Codex receives from `search_footage`.
+struct SearchPage: Decodable, Sendable {
+    var query: String
+    var totalMatches: Int
+    var truncated: Bool
+    var results: [SearchHit]
+}
+
+struct SearchHit: Decodable, Identifiable, Hashable, Sendable {
+    var segmentId: String
+    var clipId: String
+    var originalFilename: String
+    var label: String
+    var start: Double
+    var end: Double
+    var excerpt: String
+    var evidenceBasis: String
+    var status: SourceClip.Status
+    var relationships: [RelatedSegment]
+
+    var id: String { segmentId }
+}
+
+/// A suggested relationship to another Segment. Suggestions never mark one side as preferred.
+struct RelatedSegment: Decodable, Identifiable, Hashable, Sendable {
+    var relationshipId: String
+    var kind: String
+    var relatedAs: String
+    var segmentId: String
+    var clipId: String
+    var originalFilename: String
+    var start: Double
+    var end: Double
+    var excerpt: String
+    var basis: String
+
+    var id: String { relationshipId + segmentId }
+
+    var title: String {
+        switch relatedAs {
+        case "earlier_statement": "Earlier statement"
+        case "correction": "Spoken correction"
+        case "other_take": "Repeated take"
+        case "suggested_broll": "Suggested B-roll"
+        case "a_roll_explanation": "Explained in A-roll"
+        case "within_segment": kind == "repeated_take" ? "Repeated take in this segment"
+                                                       : "Spoken correction in this segment"
+        default: relatedAs
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case "spoken_correction": "arrow.uturn.backward.circle"
+        case "repeated_take": "repeat.circle"
+        default: "photo.on.rectangle"
+        }
+    }
+}
+
 /// One stdout line from the worker.
 struct WorkerEvent: Decodable, Sendable {
     var event: String
@@ -151,6 +211,8 @@ struct WorkerEvent: Decodable, Sendable {
     var snapshot: Snapshot?
     var mcp: McpStatus?
     var clipId: String?
+    var filename: String?
+    var search: SearchPage?
     var reused: Bool?
     var elapsed: Double?
     var kind: String?
