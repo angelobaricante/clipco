@@ -7,6 +7,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -19,17 +20,26 @@ struct InspectorView: View {
             .padding(12)
             Divider()
             if let clip = model.selectedClip {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        StatusBanner(clip: clip)
-                        switch model.inspectorTab {
-                        case .context: ContextSection(clip: clip)
-                        case .transcript: TranscriptSection(clip: clip)
-                        case .info: InfoSection(clip: clip, project: model.project)
+                let spoken = model.spokenLineID(in: clip)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            StatusBanner(clip: clip)
+                            switch model.inspectorTab {
+                            case .context: ContextSection(clip: clip, spoken: spoken)
+                            case .transcript: TranscriptSection(clip: clip, spoken: spoken)
+                            case .info: InfoSection(clip: clip, project: model.project)
+                            }
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onChange(of: spoken) { _, line in  // keep the spoken line in view while it plays
+                        guard let line, model.inspectorTab == .transcript else { return }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(line, anchor: .center)
                         }
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else if model.selection.count > 1 {
                 ContentUnavailableView("\(model.selection.count) Clips Selected", systemImage: "square.stack",
@@ -72,10 +82,77 @@ struct StatusBanner: View {
     }
 }
 
-struct ContextSection: View {
+/// The creator's note and retrieval choice for one clip, saved through the worker.
+struct CreatorControls: View {
+    @Environment(AppModel.self) private var model
     let clip: SourceClip
+    @State private var draft = ""
+    @FocusState private var editing: Bool
 
     var body: some View {
+        EvidenceGroup(title: "Creator note", symbol: "note.text", note: "your words, shared with Codex") {
+            TextField("Note", text: $draft, prompt: Text("Context the editing agent should know"), axis: .vertical)
+                .lineLimit(2...6)
+                .textFieldStyle(.roundedBorder)
+                .focused($editing)
+                .onSubmit(save)
+                .onChange(of: editing) { if !editing { save() } }
+                .accessibilityLabel("Creator note for \(clip.originalFilename)")
+            HStack {
+                if let note = clip.note, draft.trimmingCharacters(in: .whitespacesAndNewlines) == note.text {
+                    Text("Saved \(Date(timeIntervalSince1970: note.updatedAt).formatted(date: .omitted, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Save Note", action: save)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines) == (clip.note?.text ?? ""))
+            }
+        }
+        .onAppear { draft = clip.note?.text ?? "" }
+        // A note saved elsewhere replaces an untouched draft, so a stale draft never overwrites it.
+        .onChange(of: clip.note) { if !editing { draft = clip.note?.text ?? "" } }
+        .onDisappear { if editing { save() } }  // switching clips mid-edit keeps what was typed
+        Toggle(isOn: Binding(get: { !clip.excluded },
+                             set: { include in Task { await model.setExcluded([clip], !include) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Include in retrieval")
+                Text(clip.excluded ? "Excluded from new default searches. Context Codex already retrieved is not revoked."
+                                   : "Codex can find this clip when it searches the Project.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.switch)
+    }
+
+    private func save() {
+        let text = draft, id = clip.id
+        Task { await model.saveNote(text, for: id) }
+    }
+}
+
+/// A transcript line, highlighted while the player is speaking it.
+struct SpokenLine: View {
+    let text: String
+    let isSpoken: Bool
+
+    var body: some View {
+        Text(text)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(isSpoken ? Color.accentColor.opacity(0.22) : .clear, in: .rect(cornerRadius: 4))
+            .accessibilityAddTraits(isSpoken ? .isSelected : [])
+            .accessibilityValue(isSpoken ? "Now playing" : "")
+    }
+}
+
+struct ContextSection: View {
+    @Environment(AppModel.self) private var model
+    let clip: SourceClip
+    let spoken: Segment.Line.ID?
+
+    var body: some View {
+        CreatorControls(clip: clip).id(clip.id)
+        Divider()
         if clip.segments.isEmpty {
             Text("No saved context yet.").foregroundStyle(.secondary)
         }
@@ -84,8 +161,13 @@ struct ContextSection: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(segment.label).font(.headline)
                     Spacer()
-                    Text("\(segment.start.timecode)–\(segment.end.timecode)")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Button("\(segment.start.timecode)–\(segment.end.timecode)") {
+                        Task { await model.openPlayer(clip.id, at: segment.start) }
+                    }
+                        .buttonStyle(.link)
+                        .font(.caption.monospacedDigit())
+                        .help("Play the original from \(segment.start.timecode)")
+                        .accessibilityLabel("Play from \(segment.start.timecode) to \(segment.end.timecode)")
                 }
                 EvidenceGroup(title: "Model interpretation", symbol: "sparkles",
                               note: segment.interpretation.model) {
@@ -110,7 +192,26 @@ struct ContextSection: View {
                         Text("No speech detected").foregroundStyle(.secondary)
                     }
                     ForEach(segment.transcript) { line in
-                        Text("“\(line.text)”")
+                        SpokenLine(text: "“\(line.text)”", isSpoken: line.id == spoken)
+                    }
+                }
+                if !segment.relationships.isEmpty {
+                    EvidenceGroup(title: "Suggested relationships", symbol: "link",
+                                  note: "derived from saved evidence; none is preferred") {
+                        ForEach(segment.relationships) { related in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: related.symbol)
+                                    Text(related.title).fontWeight(.semibold)
+                                    if related.excluded { Text("· excluded").foregroundStyle(.secondary) }
+                                }
+                                Text("\(related.originalFilename) \(related.start.timecode)–\(related.end.timecode)")
+                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                Text("“\(related.excerpt)”").lineLimit(3)
+                            }
+                            .help(related.basis)
+                            .accessibilityElement(children: .combine)
+                        }
                     }
                 }
             }
@@ -140,7 +241,9 @@ struct EvidenceGroup<Content: View>: View {
 }
 
 struct TranscriptSection: View {
+    @Environment(AppModel.self) private var model
     let clip: SourceClip
+    let spoken: Segment.Line.ID?
 
     var body: some View {
         let lines = clip.segments.flatMap(\.transcript)
@@ -149,10 +252,15 @@ struct TranscriptSection: View {
         }
         ForEach(lines) { line in
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(line.start.timecode).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Button(line.start.timecode) { Task { await model.openPlayer(clip.id, at: line.start) } }
+                    .buttonStyle(.link)
+                    .font(.caption.monospacedDigit())
                     .frame(width: 52, alignment: .trailing)
-                Text(line.text).textSelection(.enabled)
+                    .help("Play from \(line.start.timecode)")
+                    .accessibilityLabel("Play from \(line.start.timecode)")
+                SpokenLine(text: line.text, isSpoken: line.id == spoken).textSelection(.enabled)
             }
+            .id(line.id)
         }
     }
 }
@@ -179,6 +287,7 @@ struct InfoSection: View {
             }
             Section("Index") {
                 LabeledContent("Status", value: clip.status.rawValue.capitalized)
+                LabeledContent("Retrieval", value: clip.excluded ? "Excluded from default search" : "Included")
                 LabeledContent("Revision", value: "\(clip.revision)")
                 if let project { LabeledContent("Project ID") { Text(project.id).textSelection(.enabled) } }
                 LabeledContent("Clip ID") { Text(clip.id).textSelection(.enabled) }

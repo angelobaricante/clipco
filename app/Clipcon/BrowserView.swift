@@ -18,8 +18,91 @@ struct BrowserView: View {
             } actions: {
                 Button("Import Footage…") { model.showImport = true }
             }
+        } else if model.visibleClips.isEmpty {
+            ContentUnavailableView("No \(model.filter.rawValue) Clips", systemImage: model.filter.symbol,
+                                   description: Text(model.filter == .excluded
+                                       ? "Excluded clips stay out of new default searches. None are excluded."
+                                       : "No clips in this Project match this filter."))
+        } else if model.browserMode == .list {
+            ClipTable()
         } else {
             ClipGrid(columns: columns)
+        }
+    }
+}
+
+/// Menu items shared by the grid and the list. Like Finder, acting on a selected clip acts on the whole selection.
+struct ClipActions: View {
+    @Environment(AppModel.self) private var model
+    let targets: [SourceClip]
+
+    var body: some View {
+        let allExcluded = !targets.isEmpty && targets.allSatisfy(\.excluded)
+        if targets.count == 1 {
+            Button("Play", systemImage: "play") { Task { await model.openPlayer(targets[0].id) } }
+            Button("Quick Look", systemImage: "eye") {
+                model.select(targets[0].id)
+                Task { await model.quickLook() }
+            }
+        }
+        Button(allExcluded ? "Include in Retrieval" : "Exclude from Retrieval",
+               systemImage: allExcluded ? "eye" : "eye.slash") {
+            Task { await model.setExcluded(targets, !allExcluded) }
+        }
+        Divider()
+        Button(targets.count == 1 ? "Remove from Project…" : "Remove \(targets.count) Clips from Project…",
+               systemImage: "trash", role: .destructive) {
+            model.clipsToRemove = targets
+        }
+        .disabled(!model.canDelete)
+    }
+}
+
+/// The list view: a native table over the same clips, filter, and selection as the grid.
+struct ClipTable: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Table(model.visibleClips, selection: $model.selection) {
+            TableColumn("Clip") { clip in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(clip.displayLabel).lineLimit(1)
+                    Text(clip.originalFilename).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .width(min: 180, ideal: 280)
+            TableColumn("Role") { clip in Text(clip.role.map { $0 == "a-roll" ? "A-roll" : "B-roll" } ?? "—") }
+                .width(70)
+            TableColumn("Duration") { clip in Text(clip.duration?.timecode ?? "—").monospacedDigit() }
+                .width(70)
+            TableColumn("Status") { clip in
+                let stage = clip.id == model.activity?.clipID ? model.activity?.stage : nil
+                Text(stage ?? clip.status.rawValue.capitalized).foregroundStyle(clip.status == .failed ? .orange : .primary)
+            }
+            .width(min: 80, ideal: 120)
+            TableColumn("Retrieval") { clip in
+                HStack(spacing: 4) {
+                    if clip.excluded { Label("Excluded", systemImage: "eye.slash") }
+                    if clip.note != nil { Label("Note", systemImage: "note.text").labelStyle(.iconOnly) }
+                }
+                .foregroundStyle(.secondary)
+            }
+            .width(min: 80, ideal: 100)
+        }
+        .contextMenu(forSelectionType: SourceClip.ID.self) { ids in
+            ClipActions(targets: model.visibleClips.filter { ids.contains($0.id) })
+        } primaryAction: { ids in
+            guard ids.count == 1, let id = ids.first else { return }
+            Task { await model.openPlayer(id) }
+        }
+        .onKeyPress(.space) { model.playSelectedClip() ? .handled : .ignored }
+        .onChange(of: model.selection) { _, new in
+            if new.count == 1 { model.selectionAnchor = new.first }
+        }
+        .onDeleteCommand {
+            if model.canDelete, !model.selectedClips.isEmpty { model.clipsToRemove = model.selectedClips }
         }
     }
 }
@@ -51,8 +134,11 @@ struct ClipGrid: View {
                         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: {
                             frames[clip.id] = $0
                         }
+                        .onTapGesture(count: 2) { Task { await model.openPlayer(clip.id) } }
                         .onTapGesture { click(clip.id) }
-                        .contextMenu { contextMenu(for: clip) }
+                        .contextMenu {
+                            ClipActions(targets: model.selection.contains(clip.id) ? model.selectedClips : [clip])
+                        }
                 }
             }
             .padding(16)
@@ -90,6 +176,7 @@ struct ClipGrid: View {
         .onDeleteCommand {  // the Delete key and Edit ▸ Delete
             if model.canDelete, !model.selectedClips.isEmpty { model.clipsToRemove = model.selectedClips }
         }
+        .onKeyPress(.space) { model.playSelectedClip() ? .handled : .ignored }
     }
 
     private nonisolated static let space = "clip-grid"
@@ -129,16 +216,6 @@ struct ClipGrid: View {
         if let first = model.visibleClips.first(where: { touched.contains($0.id) }) { model.selectionAnchor = first.id }
     }
 
-    @ViewBuilder private func contextMenu(for clip: SourceClip) -> some View {
-        // Like Finder: acting on a selected clip acts on the whole selection.
-        let targets = model.selection.contains(clip.id) ? model.selectedClips : [clip]
-        Button(targets.count == 1 ? "Remove from Project…" : "Remove \(targets.count) Clips from Project…",
-               systemImage: "trash", role: .destructive) {
-            model.clipsToRemove = targets
-        }
-        .disabled(!model.canDelete)
-    }
-
     private func move(_ direction: MoveCommandDirection) {
         let ids = model.visibleClips.map(\.id)
         guard let current = model.selectionAnchor.flatMap(ids.firstIndex(of:)) else {
@@ -168,16 +245,23 @@ struct ClipCard: View {
                     RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
                 }
-            Text(clip.displayLabel).font(.headline).lineLimit(1)
+            HStack(spacing: 4) {
+                Text(clip.displayLabel).font(.headline).lineLimit(1)
+                if clip.note != nil {
+                    Image(systemName: "note.text").foregroundStyle(.secondary).accessibilityLabel("Has creator note")
+                }
+            }
             Text(clip.originalFilename).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 .truncationMode(.middle)
             HStack(spacing: 6) {
                 if let duration = clip.duration { Text(duration.timecode) }
                 if let role = clip.role { Text(role == "a-roll" ? "A-roll" : "B-roll") }
+                if clip.excluded { Label("Excluded", systemImage: "eye.slash").foregroundStyle(.secondary) }
             }
             .font(.caption2).foregroundStyle(.tertiary)
         }
         .padding(6)
+        .opacity(clip.excluded ? 0.6 : 1)
         .contentShape(.rect)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
@@ -249,7 +333,8 @@ struct SearchHitRow: View {
             Text("“\(hit.excerpt)”").lineLimit(3)
             HStack(spacing: 6) {
                 Text(hit.originalFilename).lineLimit(1).truncationMode(.middle)
-                Text("· from \(hit.evidenceBasis)")
+                Text("· from \(hit.evidenceName)")
+                if hit.excluded { Text("· excluded").foregroundStyle(.orange) }
                 if hit.status != .ready { Text("· \(hit.status.rawValue)").foregroundStyle(.orange) }
             }
             .font(.caption).foregroundStyle(.secondary)

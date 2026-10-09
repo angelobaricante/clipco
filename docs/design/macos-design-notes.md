@@ -8,6 +8,8 @@ The original four-variant study is on the `prototype/footage-review-flow` branch
 
 On October 9, 2026, the creator chose Variant D: “bro i like it! lets go with this D.” The MVP will implement its macOS sidebar/browser/inspector workflow in native SwiftUI. Context notes, reversible exclusion, explicit indexing/source failures, and simple retry/restore affordances are retained. A full transcript editor and a footage-editing timeline are outside this decision. Real media playback, actual source access, persistent notes, and live MCP setup still need implementation. The prototype validates the direction, not native performance.
 
+During native review the same day, the creator changed playback: instead of Quick Look or a player in the inspector, double-click (or Space) opens a player covering the footage browser while the inspector stays beside it, and the transcript highlights the line being spoken. Quick Look remains on ⌘Y.
+
 ## Interaction design
 
 - A persistent source sidebar organizes All Footage, A-roll, B-roll, Needs Review, and Excluded. Counts and selection remain visible.

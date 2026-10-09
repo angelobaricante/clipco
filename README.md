@@ -8,7 +8,7 @@ The approved MVP uses native SwiftUI, a local Python worker, Ollama/Qwen3.5, whi
 
 ## Project status
 
-Task #2 (one real clip through local analysis and native review) is complete. Task #3 (Codex retrieval through MCP) is in progress. Full-Project discovery, offline operation, and savings still need to be demonstrated. The image below is an approved browser design study with illustrative media, not a running native app.
+Tasks #2–#4 (one real clip, Codex retrieval through MCP, full-Project discovery) are complete. Task #5 (native review with notes and exclusions) is in review. Recovery, offline operation, and savings still need to be demonstrated. The image below is an approved browser design study with illustrative media, not a running native app.
 
 ![Approved macOS workspace direction](docs/design/macos-workspace.jpg)
 
@@ -83,6 +83,12 @@ The worker CLI is also usable directly: `uv run clipcon-worker readiness|warmup|
 ## Connect Codex (task #3: MCP retrieval)
 
 `clipcon-mcp` is a read-only stdio MCP server over the saved index. It loads no model and does not need the app to be running. Its five tools are `get_project_overview`, `search_footage`, `get_segment_context`, `get_segment_preview`, and `resolve_media`. Each tool takes an explicit `project_id` or `segment_id`.
+
+## Review footage (task #5)
+
+The sidebar filters All Footage, A-roll, B-roll, Needs Review (not ready yet, or a suggested correction/repeated take to choose between), and Excluded. Grid and list (⌘1/⌘2) share one selection. Double-click a clip (or press Space, or Clip ▸ Play, ⌘↓) to play its original over the browser, after Clipcon checks it is the indexed file (same size and modification time). The inspector stays beside the player: the Transcript tab highlights and follows the line being spoken, and clicking a line's time or a segment's range jumps playback there. Esc closes the player; ⌘Y opens the original in Quick Look. ⌘F focuses search.
+
+In the inspector's Context tab, a **creator note** is saved through the worker when you leave the field. Codex receives it in `get_segment_context` as `creator_notes`, kept apart from transcript, observations, and interpretation, and `search_footage` matches it as `creator_note` evidence. **Include in retrieval** (or Clip ▸ Exclude from Retrieval, ⇧⌘E) is reversible. Excluded clips leave new default `search_footage` results and relationship suggestions; `include_excluded: true` still finds them. Context Codex already retrieved is not revoked: fetching an excluded Segment by ID returns it with `excluded: true`. From the command line: `clipcon-worker set-note --clip ID --text "…"` and `clipcon-worker set-excluded --project ID --excluded yes|no CLIP_ID…`.
 
 Open the setup sheet by clicking the readiness badge in the sidebar. The **Codex connection (MCP)** section runs a live MCP session against the index and shows the exact registration command. On this Mac the command is:
 

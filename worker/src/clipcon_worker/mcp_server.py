@@ -57,20 +57,22 @@ def build(home: Path) -> MCPServer:
         return guarded(lambda: result(index.projects() if project_id is None else index.overview(project_id)))
 
     @server.tool(annotations=READ_ONLY)
-    def search_footage(project_id: str, query: str, limit: int = 5, offset: int = 0) -> CallToolResult:
+    def search_footage(project_id: str, query: str, limit: int = 5, offset: int = 0,
+                       include_excluded: bool = False) -> CallToolResult:
         """Find relevant Segments in a Project's saved footage context (no model is started).
 
         Returns at most `limit` (default 5, max 10) compact matches with source-relative ranges and the
         evidence each excerpt comes from. When `truncated` is true, call again with `next_offset`.
-        An empty `results` list means nothing in the saved index matched.
+        An empty `results` list means nothing in the saved index matched. Clips the creator excluded are
+        skipped unless include_excluded is true; creator notes are searched as `creator_note` evidence.
         """
-        return guarded(lambda: result(index.search(project_id, query, limit, offset)))
+        return guarded(lambda: result(index.search(project_id, query, limit, offset, include_excluded)))
 
     @server.tool(annotations=READ_ONLY)
     def get_segment_context(segment_id: str, window_seconds: float = 15.0) -> CallToolResult:
         """Expand one Segment: timestamped transcript (plus up to window_seconds either side, max 120),
         sampled-frame observations, the model interpretation with the evidence it cites, provenance,
-        relationships, and creator notes. Times are seconds from the start of the original Source clip.
+        relationships, creator notes, and whether the creator excluded the clip. Times are seconds from the start of the original Source clip.
         """
         return guarded(lambda: result(index.segment_context(segment_id, window_seconds)))
 

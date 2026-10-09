@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS source_clips (
   stage TEXT, error TEXT,
   duration REAL, width INTEGER, height INTEGER, fps REAL, video_codec TEXT, audio_codec TEXT,
   label TEXT, role TEXT, role_basis TEXT, speech_language TEXT,
-  revision INTEGER NOT NULL DEFAULT 0, analysis_key TEXT,
+  revision INTEGER NOT NULL DEFAULT 0, analysis_key TEXT, excluded INTEGER NOT NULL DEFAULT 0,
   created_at REAL NOT NULL, updated_at REAL NOT NULL,
   UNIQUE (project_id, source_path)
 );
@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS frames (
 CREATE TABLE IF NOT EXISTS observations (
   frame_id TEXT NOT NULL REFERENCES frames(id), segment_id TEXT NOT NULL REFERENCES segments(id), text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS creator_notes (
+  clip_id TEXT PRIMARY KEY REFERENCES source_clips(id), text TEXT NOT NULL, updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS relationships (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), kind TEXT NOT NULL,
@@ -65,6 +68,8 @@ class Store:
         columns = {r["name"] for r in self.db.execute("PRAGMA table_info(source_clips)")}
         if "speech_language" not in columns:  # indexes created before multilingual speech
             self.db.execute("ALTER TABLE source_clips ADD COLUMN speech_language TEXT")
+        if "excluded" not in columns:  # indexes created before creator exclusions
+            self.db.execute("ALTER TABLE source_clips ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
         derived = self.db.execute("SELECT value FROM meta WHERE key='relationships_version'").fetchone()
         if derived is None or int(derived[0]) != relationships.VERSION:  # saved before these rules existed
             self.db.execute("BEGIN IMMEDIATE")
@@ -149,6 +154,36 @@ class Store:
             db.execute("ROLLBACK")
             raise
 
+    def set_note(self, clip_id: str, text: str) -> dict | None:
+        """Save the creator's note for a clip (empty text clears it). Notes sit beside the analysed evidence and
+        survive re-analysis; they never replace it."""
+        if not self.db.execute("SELECT 1 FROM source_clips WHERE id=?", (clip_id,)).fetchone():
+            raise ValueError(f"unknown clip {clip_id}")
+        text = text.strip()
+        if not text:
+            self.db.execute("DELETE FROM creator_notes WHERE clip_id=?", (clip_id,))
+            return None
+        self.db.execute("INSERT OR REPLACE INTO creator_notes VALUES (?,?,?)", (clip_id, text, time.time()))
+        return self.note(clip_id)
+
+    def set_excluded(self, project_id: str, clip_ids: list[str], excluded: bool) -> None:
+        """Exclude clips from (or restore them to) new default searches. Reversible: no context is deleted."""
+        db = self.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for clip_id in clip_ids:
+                if db.execute("UPDATE source_clips SET excluded=? WHERE id=? AND project_id=?",
+                              (int(excluded), clip_id, project_id)).rowcount != 1:
+                    raise ValueError(f"clip {clip_id} is not in project {project_id}")
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+
+    def note(self, clip_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM creator_notes WHERE clip_id=?", (clip_id,)).fetchone()
+        return dict(row) if row else None
+
     def _delete_clip(self, clip_id: str) -> None:
         """Delete one clip's saved context rows (inside a caller's transaction)."""
         db = self.db
@@ -158,6 +193,7 @@ class Store:
             db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
         db.execute("DELETE FROM segments WHERE clip_id=?", (clip_id,))
         db.execute("DELETE FROM analyses WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM creator_notes WHERE clip_id=?", (clip_id,))
         db.execute("DELETE FROM source_clips WHERE id=?", (clip_id,))
 
     def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
@@ -225,6 +261,8 @@ class Store:
         clips = []
         for c in db.execute("SELECT * FROM source_clips WHERE project_id=? ORDER BY created_at", (project_id,)):
             clip = dict(c)
+            clip["excluded"] = bool(clip["excluded"])
+            clip["note"] = self.note(clip["id"])
             analysis = db.execute("SELECT * FROM analyses WHERE clip_id=? AND revision=?",
                                   (clip["id"], clip["revision"])).fetchone()
             vision = json.loads(analysis["vision_identity"]) if analysis else {}

@@ -51,16 +51,34 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     var roleBasis: String?
     var speechLanguage: String?
     var revision: Int
+    var sizeBytes: Int?
+    var mtime: Double?
+    /// The creator excluded this clip from new default searches (reversible; nothing is deleted).
+    var excluded: Bool
+    var note: CreatorNote?
     var analysis: Analysis?
     var segments: [Segment]
 
     var displayLabel: String { label ?? originalFilename }
+
+    var relationships: [RelatedSegment] { segments.flatMap(\.relationships) }
+
+    /// Not yet usable context, or suggested corrections/takes the creator may want to choose between.
+    var needsReview: Bool {
+        status != .ready || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+    }
 
     /// Whisper's language code as a readable name, e.g. "tl" → "Tagalog".
     var speechLanguageName: String? {
         speechLanguage.map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
     }
     var thumbnailPath: String? { segments.first?.observations.first?.frame.path }
+}
+
+/// Written by the creator in Clipcon, about the whole Source clip; kept apart from model output.
+struct CreatorNote: Decodable, Hashable, Sendable {
+    var text: String
+    var updatedAt: Double
 }
 
 struct Analysis: Decodable, Hashable, Sendable {
@@ -110,6 +128,7 @@ struct Segment: Decodable, Identifiable, Hashable, Sendable {
     var transcript: [Line]
     var observations: [Observation]
     var interpretation: Interpretation
+    var relationships: [RelatedSegment]
 }
 
 /// Result of the app's Codex connection check: a real MCP session with clipcon-mcp.
@@ -157,9 +176,13 @@ struct SearchHit: Decodable, Identifiable, Hashable, Sendable {
     var excerpt: String
     var evidenceBasis: String
     var status: SourceClip.Status
+    var excluded: Bool
+    var hasCreatorNote: Bool
     var relationships: [RelatedSegment]
 
     var id: String { segmentId }
+
+    var evidenceName: String { evidenceBasis == "creator_note" ? "creator note" : evidenceBasis }
 }
 
 /// A suggested relationship to another Segment. Suggestions never mark one side as preferred.
@@ -172,8 +195,10 @@ struct RelatedSegment: Decodable, Identifiable, Hashable, Sendable {
     var originalFilename: String
     var start: Double
     var end: Double
+    var label: String
     var excerpt: String
     var basis: String
+    var excluded: Bool
 
     var id: String { relationshipId + segmentId }
 

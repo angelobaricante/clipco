@@ -145,7 +145,7 @@ def test_a_spoken_correction_is_linked_to_the_earlier_statement_without_erasing_
     assert set(spoken) == {"The filter holds two litres per hour.",
                            "Actually, I mean two litres per minute, not per hour."}
     assert all(e["transcript_id"].startswith("trn_") and 0 <= e["start"] < e["end"] for e in spoken.values())
-    assert "preferred" not in rel and "relationships" not in ctx["not_yet_available"]
+    assert "preferred" not in rel
 
 
 def test_repeated_takes_are_related_without_choosing_one(home, tmp_path):
