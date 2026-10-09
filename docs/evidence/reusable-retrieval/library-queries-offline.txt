@@ -1,0 +1,13 @@
+## {'scope': 'library', 'query': 'calm focused work at a desk'}
+   IMG_6189.MOV 9.0 18.1 b-roll 12.0 ['calm', 'curious'] | literal | Shows or says what was asked for (interpretation): A person is sitting at a desk and typing on a lap
+   IMG_6189.MOV 0.0 9.0 b-roll 10.38 ['calm', 'curious', 'nostalgic'] | literal | Shows or says what was asked for (interpretation): The video shows a person in a white t-shirt. In t
+   IMG_6188.MOV 7.9 15.8 b-roll 7.5 ['curious', 'calm', 'nostalgic'] | emotional | Suggested tone calm: The scene is calm because it depicts a quiet, focused moment of digital work in
+   IMG_6188.MOV 0.0 7.9 b-roll 6.5 ['curious', 'calm', 'nostalgic'] | metaphorical | Could stand for focused study: It stands for the quiet, concentrated effort of reviewing materials i
+   IMG_6189.MOV 18.1 27.1 b-roll 3.12 ['curious', 'tense'] | literal | Shows or says what was asked for (interpretation): The video shows a man working on his laptop who t
+## {'scope': 'library', 'query': 'a sudden realization'}
+   IMG_6189.MOV 18.1 27.1 b-roll 5.25 ['curious', 'tense'] | literal | Shows or says what was asked for (interpretation): The video shows a man working on his laptop who t
+## {'scope': 'library', 'query': 'laptop', 'tone': 'tense'}
+   IMG_6189.MOV 18.1 27.1 b-roll 5.62 ['curious', 'tense'] | literal | Shows or says what was asked for (interpretation): The video shows a man working on his laptop who t
+## {'scope': 'library', 'query': 'something joyful'}
+## {'scope': 'library', 'query': 'talking to the camera'}
+   IMG_6188.MOV 7.9 15.8 b-roll 3.0 ['curious', 'calm', 'nostalgic'] | literal | Shows or says what was asked for (interpretation): The video shows a person using a laptop to edit f

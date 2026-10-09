@@ -1,0 +1,117 @@
+{
+  "after" : {
+    "excluded" : false,
+    "note" : null,
+    "selected" : true
+  },
+  "at_launch" : {
+    "excluded" : false,
+    "note" : null
+  },
+  "command_f_items" : [
+    "Edit ▸ Find in Footage Context"
+  ],
+  "counts" : {
+    "A-roll" : 3,
+    "All Footage" : 7,
+    "B-roll" : 4,
+    "Excluded" : 0,
+    "Needs Review" : 3,
+    "Reusable B-roll" : 2
+  },
+  "error" : null,
+  "library" : {
+    "projects" : [
+      "Clipcon Demo Tutorial"
+    ],
+    "reusable_clips" : [
+      "IMG_6188.MOV",
+      "IMG_6189.MOV"
+    ],
+    "reuse_allowed" : true,
+    "role_summary" : "B-roll",
+    "segment_roles" : [
+      "0:00.0–0:09.0 b-roll (suggested b-roll, creator b-roll)",
+      "0:09.0–0:18.1 b-roll (suggested b-roll, creator none)",
+      "0:18.1–0:27.1 b-roll (suggested b-roll, creator none)"
+    ],
+    "segment_tones" : [
+      "0:00.0–0:09.0 suggested: Calm, Curious, Nostalgic (suggested calm,curious,nostalgic, creator none)",
+      "0:09.0–0:18.1 suggested: Calm, Curious (suggested calm,curious, creator none)",
+      "0:18.1–0:27.1 creator: Tense (suggested curious,tense, creator tense)"
+    ]
+  },
+  "library_view" : true,
+  "project" : "Clipcon Demo Tutorial",
+  "search" : [
+    {
+      "basis" : "interpretation",
+      "excluded" : false,
+      "file" : "IMG_6189.MOV",
+      "fit" : "literal",
+      "fit_explanation" : "Shows or says what was asked for (interpretation): A person is sitting at a desk and typing on a laptop. There is no speech detected in this range. Emotional fit: calm.",
+      "range" : "0:09.0–0:18.1",
+      "tones" : [
+        "calm",
+        "curious"
+      ]
+    },
+    {
+      "basis" : "interpretation",
+      "excluded" : false,
+      "file" : "IMG_6189.MOV",
+      "fit" : "literal",
+      "fit_explanation" : "Shows or says what was asked for (interpretation): The video shows a person in a white t-shirt. In the first frame, they are seen up close. In the second frame, they are standing by a desk and looking down at it. Emotional fit: calm.",
+      "range" : "0:00.0–0:09.0",
+      "tones" : [
+        "calm",
+        "curious",
+        "nostalgic"
+      ]
+    },
+    {
+      "basis" : "tone",
+      "excluded" : false,
+      "file" : "IMG_6188.MOV",
+      "fit" : "emotional",
+      "fit_explanation" : "Suggested tone calm: The scene is calm because it depicts a quiet, focused moment of digital work in a dimly lit room.",
+      "range" : "0:07.9–0:15.8",
+      "tones" : [
+        "curious",
+        "calm",
+        "nostalgic"
+      ]
+    },
+    {
+      "basis" : "connotation",
+      "excluded" : false,
+      "file" : "IMG_6188.MOV",
+      "fit" : "metaphorical",
+      "fit_explanation" : "Could stand for focused study: It stands for the quiet, concentrated effort of reviewing materials in a private setting. Emotional fit: calm.",
+      "range" : "0:00.0–0:07.9",
+      "tones" : [
+        "curious",
+        "calm",
+        "nostalgic"
+      ]
+    },
+    {
+      "basis" : "interpretation",
+      "excluded" : false,
+      "file" : "IMG_6189.MOV",
+      "fit" : "literal",
+      "fit_explanation" : "Shows or says what was asked for (interpretation): The video shows a man working on his laptop who then suddenly leans forward in his chair. Since no speech was detected, there is no audio context for this movement.",
+      "range" : "0:18.1–0:27.1",
+      "tones" : [
+        "tense"
+      ]
+    }
+  ],
+  "selection_preserved" : {
+    "grid_view" : true,
+    "inspector_hidden" : true,
+    "list_view" : true
+  },
+  "source_access" : "available(file:\/\/\/Users\/angelobaricante\/Downloads\/IMG_6189.MOV)",
+  "window_number" : 51312
+}

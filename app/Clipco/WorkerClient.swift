@@ -128,15 +128,25 @@ struct WorkerClient: Sendable {
         return p
     }
 
-    func snapshot(projectID: String) async throws -> Snapshot {
-        guard let s = try await run(["snapshot", "--project", projectID]).snapshot else { throw WorkerError.noResult }
+    /// A Project, or the whole Footage library when projectID is nil.
+    private static func destination(_ projectID: String?) -> [String] {
+        projectID.map { ["--project", $0] } ?? ["--library"]
+    }
+
+    /// One Project's clips, or every library source (with its Projects but no Project notes) when nil.
+    func snapshot(projectID: String?) async throws -> Snapshot {
+        guard let s = try await run(["snapshot"] + Self.destination(projectID)).snapshot else {
+            throw WorkerError.noResult
+        }
         return s
     }
 
     /// Reads the saved index only, so it answers while another worker process is analysing footage.
-    /// The creator's own search also matches excluded clips (marked), so they can be found and restored.
-    func search(projectID: String, query: String) async throws -> SearchPage {
-        let args = ["search", "--project", projectID, "--query", query, "--include-excluded"]
+    /// The creator's own Project search also matches excluded clips (marked), so they can be found and restored.
+    /// Library scope searches reusable B-roll everywhere, as Codex does, preferring projectID's own footage.
+    func search(projectID: String?, query: String, library: Bool = false) async throws -> SearchPage {
+        let args = library ? ["search", "--scope", "library", "--query", query] + (projectID.map { ["--project", $0] } ?? [])
+                           : ["search", "--project", projectID ?? "", "--query", query, "--include-excluded"]
         guard let page = try await run(args).search else {
             throw WorkerError.noResult
         }
@@ -161,6 +171,20 @@ struct WorkerClient: Sendable {
     /// Records the creator's role for a Segment; nil clears it so the suggested role applies again.
     func setSegmentRole(segmentID: String, role: String?) async throws {
         _ = try await run(["set-segment-role", "--segment", segmentID, "--role", role ?? "suggested"])
+    }
+
+    /// Records the creator's emotional tones for a Segment (an empty list says it has none); nil clears them so
+    /// the suggestions apply again. The model's suggestions and evidence are never rewritten.
+    func setSegmentTones(segmentID: String, tones: [String]?) async throws {
+        let choice = tones.map { ["--tones", $0.joined(separator: ",")] } ?? ["--suggested"]
+        _ = try await run(["set-segment-tones", "--segment", segmentID] + choice)
+    }
+
+    /// Reads emotional tone, one clip after another, for Segments that have none yet. Only saved evidence is
+    /// used: nothing is re-transcribed or re-described.
+    func enrichTone(projectID: String?, clipIDs: [String],
+                    onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
+        try await run(["enrich-tone"] + Self.destination(projectID) + clipIDs, onEvent: onProgress)
     }
 
     /// Forgets sources everywhere: saved context, every Project membership, and the frame cache. Originals stay.
@@ -191,15 +215,15 @@ struct WorkerClient: Sendable {
 
     /// Re-verifies analysed clips' originals: missing ones become missing, changed content or analysis settings
     /// make them stale, and originals that are back and unchanged make them ready again. Context is kept.
-    func checkSources(projectID: String,
+    func checkSources(projectID: String?,
                       onProgress: @escaping @Sendable (WorkerEvent) async -> Void = { _ in }) async throws {
-        _ = try await run(["check-sources", "--project", projectID], onEvent: onProgress)
+        _ = try await run(["check-sources"] + Self.destination(projectID), onEvent: onProgress)
     }
 
     /// Re-analyses clips from their originals, keeping each clip's ID, note, and exclusion.
-    func retry(projectID: String, clipIDs: [String],
+    func retry(projectID: String?, clipIDs: [String],
                onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
-        try await run(["retry", "--project", projectID] + clipIDs, onEvent: onProgress)
+        try await run(["retry"] + Self.destination(projectID) + clipIDs, onEvent: onProgress)
     }
 
     /// Points a clip at its original in a new location. The worker accepts only the same content.

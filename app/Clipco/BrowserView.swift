@@ -349,7 +349,7 @@ struct SearchHitRow: View {
                 Text("\(hit.start.timecode)–\(hit.end.timecode)").font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Text("“\(hit.excerpt)”").lineLimit(3)
+            if hit.fit == nil { Text("“\(hit.excerpt)”").lineLimit(3) }  // a library fit explanation quotes it
             HStack(spacing: 6) {
                 Text(hit.originalFilename).lineLimit(1).truncationMode(.middle)
                 Text("· from \(hit.evidenceName)")
@@ -357,6 +357,26 @@ struct SearchHitRow: View {
                 if hit.status != .ready { Text("· \(hit.status.rawValue)").foregroundStyle(.orange) }
             }
             .font(.caption).foregroundStyle(.secondary)
+            if let fit = hit.fit {  // library results: how it supports the request, and where it comes from
+                Label(fit.explanation, systemImage: fit.kind == "metaphorical" ? "sparkle"
+                                                    : fit.kind == "emotional" ? "heart" : "eye")
+                    .font(.caption).lineLimit(3)
+                HStack(spacing: 6) {
+                    Text(fit.kind.capitalized + " fit")
+                    if let origins = hit.origins {
+                        Text("· " + (origins.isEmpty ? "Library only" : origins.map(\.name).joined(separator: ", ")))
+                    }
+                    if fit.currentProject { Text("· this Project") }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                if let caution = fit.caution { Text(caution).font(.caption).foregroundStyle(.orange).lineLimit(2) }
+            }
+            if let tone = hit.tone {
+                Text("Tone: " + (tone.state == "not_analyzed" ? "Not analyzed"
+                                 : tone.tones.isEmpty ? "No supported tone"
+                                 : tone.tones.map(\.capitalized).joined(separator: ", ")))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             ForEach(hit.relationships) { related in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: related.symbol).foregroundStyle(.secondary)

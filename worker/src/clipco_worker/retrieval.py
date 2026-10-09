@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import roles
+from . import roles, tone
 from .text import matches, terms, words
 
 DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipco"
@@ -36,7 +36,23 @@ RELATIONSHIPS_PER_RESULT = 3
 RELATIONSHIPS_PER_CONTEXT = 10
 
 # Evidence kinds a match can rest on, and how strongly each counts toward relevance.
-WEIGHTS = {"transcript": 3.0, "creator_note": 3.0, "label": 2.0, "interpretation": 2.0, "observation": 1.5}
+WEIGHTS = {"transcript": 3.0, "creator_note": 3.0, "label": 2.0, "interpretation": 2.0, "observation": 1.5,
+           "connotation": 2.0, "tone": 1.0}
+# Library discovery also weighs emotional fit: each requested tone a Segment has adds this much.
+TONE_FIT_WEIGHT = 4.0
+# The requesting Project's own footage gets this modest edge, enough to lead among comparable candidates but
+# not to outrank clearly better footage from elsewhere.
+PROJECT_PREFERENCE = 1.1
+# How a library match supports the request, by the kind of evidence it rests on.
+FIT_KIND = {"connotation": "metaphorical", "tone": "emotional"}
+# Evidence of what the footage shows or says; a match on any of it is a literal fit, shown before a metaphor.
+DEPICTED = frozenset({"transcript", "creator_note", "label", "interpretation", "observation"})
+# Words that frame a mood or footage request ("something calm", "a tense moment") rather than describe content;
+# matching them in model text would pad library results with unrelated footage.
+REQUEST_FILLER = frozenset("""
+something anything some any shot shots footage clip clips broll scene scenes feel feeling feels vibe vibes mood
+moment moments kind sort looks look looking like
+""".split())
 # Further matching lines add less than the best one, so long Segments do not win on length alone.
 SUPPORTING_WEIGHT = 0.25
 
@@ -155,12 +171,13 @@ class Index:
                             "note": "Search reusable B-roll across the library with search_footage scope='library'."}}
 
     @staticmethod
-    def _role_summaries(db: sqlite3.Connection, clip_ids: list[str]) -> dict[str, str]:
+    def _summaries(db: sqlite3.Connection, clip_ids: list[str]) -> dict[str, tuple[str, dict]]:
+        """Per clip: its Segments' role summary, and how many Segments are in each emotional tone state."""
         out = {}
         for clip_id in clip_ids:
-            found = [r["effective_role"] for r in db.execute(SEGMENT_ROW + " WHERE s.clip_id=? ORDER BY s.ordinal",
-                                                              (clip_id,))]
-            out[clip_id] = roles.summary(found)["text"]
+            rows = db.execute(SEGMENT_ROW + " WHERE s.clip_id=? ORDER BY s.ordinal", (clip_id,)).fetchall()
+            out[clip_id] = (roles.summary([r["effective_role"] for r in rows])["text"],
+                            dict(Counter(tone.read(db, r)["state"] for r in rows)))
         return out
 
     def overview(self, project_id: str) -> dict:
@@ -170,7 +187,7 @@ class Index:
                 "SELECT c.*, m.excluded, (SELECT COUNT(*) FROM segments s WHERE s.clip_id = c.id) AS segment_count"
                 " FROM memberships m JOIN source_clips c ON c.id = m.clip_id WHERE m.project_id=?"
                 " ORDER BY m.created_at, c.created_at", (project_id,)).fetchall()
-            summaries = self._role_summaries(db, [c["id"] for c in clips])
+            summaries = self._summaries(db, [c["id"] for c in clips])
         statuses = {c["id"]: status_fields(c) for c in clips}
         return {
             "project": {"project_id": project["id"], "name": project["name"], "context": project["context"]},
@@ -178,7 +195,8 @@ class Index:
             "excluded_count": sum(1 for c in clips if c["excluded"]),
             "clips": [{
                 "clip_id": c["id"], "original_filename": c["original_filename"], "label": c["label"],
-                "role": c["role"], "segment_roles": summaries[c["id"]],
+                "role": c["role"], "segment_roles": summaries[c["id"]][0],
+                "segment_tone_states": summaries[c["id"]][1],
                 **statuses[c["id"]], "stage": c["stage"], "error": c["error"],
                 "duration": c["duration"],
                 "speech_language": c["speech_language"], "segment_count": c["segment_count"],
@@ -344,6 +362,7 @@ class Index:
                                   (seg["clip_id"], seg["revision"])).fetchone()
             relationships = self._relationships(db, seg["id"], scoped["project_id"], RELATIONSHIPS_PER_CONTEXT,
                                                 full=True)
+            tone_reading = tone.read(db, seg)
         speech = json.loads(analysis["speech_identity"]) if analysis else {}
         vision = json.loads(analysis["vision_identity"]) if analysis else {}
         omitted = max(0, len(spans) - CONTEXT_LINES_MAX)
@@ -373,6 +392,10 @@ class Index:
                                  "Project; not model output",
                 "segment_role": "suggested in code from this Segment's speech coverage and sampled frames; "
                                 "`creator` is the creator's correction, which takes precedence",
+                "emotional_tone": "suggested by a local model from the saved sampled frames, observations and "
+                                  "transcript cited in each evidence_ids; `creator` is the creator's tones, which "
+                                  "take precedence. depicted_emotion is what a shown person expresses, not the "
+                                  "viewer's response",
                 "speech": speech, "vision": vision, "speech_language": seg["speech_language"],
                 "recipe_version": json.loads(analysis["recipe"]).get("version") if analysis else None,
                 "analyzed_at": analysis["finished_at"] if analysis else None,
@@ -385,6 +408,7 @@ class Index:
             "relationships_note": "Suggestions derived from saved evidence. Both sides stay in the index; "
                                   "none is marked preferred. The creator decides which statement or take to use.",
             "creator_notes": self._notes(scoped, seg["clip_id"]),
+            "emotional_tone": tone_reading,
         }
 
     def preview(self, segment_id: str, frame_id: str | None = None, project_id: str | None = None,
@@ -447,7 +471,7 @@ class Index:
                         "tools under their normal access to this Mac."}
 
     def search(self, project_id: str | None, query: str, limit: int = SEARCH_PAGE, offset: int = 0,
-               include_excluded: bool = False, scope: str | None = None) -> dict:
+               include_excluded: bool = False, scope: str | None = None, tone_filter: str | None = None) -> dict:
         """Rank Segments by query terms found in their saved evidence; return one bounded page.
 
         Project scope (the default) searches a Project's memberships, skipping clips the creator excluded unless
@@ -460,6 +484,10 @@ class Index:
             raise RetrievalError("search_footage needs a project_id, or scope='library' for reusable B-roll")
         limit = max(1, min(limit, SEARCH_PAGE_MAX))
         offset = max(0, offset)
+        try:
+            required = tone.require_tone(tone_filter)
+        except ValueError as e:
+            raise RetrievalError(str(e)) from None
         with self._connect() as db:
             if project_id is not None:
                 self._project(db, project_id)
@@ -482,17 +510,35 @@ class Index:
                                              "origins": origins}
                 notes = {seg["id"]: [n["text"] for n in self._notes(scopes[seg["id"]], seg["clip_id"])]
                          for seg in segments}
+            tones = {seg["id"]: tone.read(db, seg) for seg in segments}
+            skipped = 0
+            if required:  # missing tone never satisfies a required one
+                skipped = sum(1 for seg in segments if tones[seg["id"]]["state"] == "not_analyzed")
+                segments = [seg for seg in segments if required in tones[seg["id"]]["tones"]]
             evidence = {}
             for seg in segments:
-                items = [("transcript", t["text"]) for t in db.execute(
-                    "SELECT text FROM transcript_spans WHERE segment_id=? ORDER BY ordinal", (seg["id"],))]
-                items += [("observation", o["text"]) for o in db.execute(
-                    "SELECT text FROM observations WHERE segment_id=? ORDER BY rowid", (seg["id"],))]
-                items += [("interpretation", seg["interpretation"]), ("label", seg["label"])]
+                items = [("transcript", t["text"], [t["id"]]) for t in db.execute(
+                    "SELECT id, text FROM transcript_spans WHERE segment_id=? ORDER BY ordinal", (seg["id"],))]
+                items += [("observation", o["text"], [o["frame_id"]]) for o in db.execute(
+                    "SELECT frame_id, text FROM observations WHERE segment_id=? ORDER BY rowid", (seg["id"],))]
+                cited = json.loads(seg["interpretation_evidence"])
+                items += [("interpretation", seg["interpretation"], cited), ("label", seg["label"], cited)]
                 # A clip-wide note, so it can match each of the clip's Segments.
-                items += [("creator_note", text) for text in notes[seg["id"]]]
+                items += [("creator_note", text, []) for text in notes[seg["id"]]]
+                if scope == "library":  # what the footage could stand for, and why a tone was suggested
+                    reading = tones[seg["id"]]
+                    items += [("connotation", f"{c['idea']}: {c['explanation']}", c["evidence_ids"])
+                              for c in reading["connotations"]]
+                    items += [("tone", f"{t['tone']}: {t['explanation']}", t["evidence_ids"])
+                              for t in reading["suggested"] if t["tone"] in reading["tones"]]
                 evidence[seg["id"]] = items
-            ranked = rank(query, segments, evidence)
+            if scope == "library":
+                ranked = rank(query, segments, evidence, ignore=REQUEST_FILLER, prefer=DEPICTED)
+            else:
+                ranked = rank(query, segments, evidence)
+            fits = {}
+            if scope == "library":
+                ranked, fits = self._fit(query, ranked, segments, evidence, tones, scopes, project_id)
             duplicates: dict[str, list[str]] = {}
             if scope == "library":  # the same footage imported from several places is one candidate
                 kept, best = [], {}
@@ -519,32 +565,80 @@ class Index:
                 **statuses[seg["clip_id"]], "revision": seg["revision"], "score": round(score, 2),
                 "excluded": self._excluded(scopes[seg["id"]]), "has_creator_note": bool(notes[seg["id"]]),
                 "relationships": related[seg["id"]],
+                "tone": {"state": tones[seg["id"]]["state"], "tones": tones[seg["id"]]["tones"]},
+                **({"fit": fits[seg["id"]]} if seg["id"] in fits else {}),
                 **({"duplicate_clip_ids": duplicates[seg["clip_id"]]} if seg["clip_id"] in duplicates else {}),
-            } for score, seg, (_, kind, text) in page],
+            } for score, seg, (_, kind, text, _ids) in page],
         }
+        if required:
+            out["tone_filter"] = required
+            out["tone_not_analyzed_skipped"] = skipped
         if scope == "library":
-            out["scope_note"] = ("Reusable B-roll from the whole library. Origins name the Projects it came from; "
-                                 "it does not document events in your Project. Pass scope='library' when expanding "
+            out["scope_note"] = ("Reusable B-roll from the whole library, ranked by how well it suits the request "
+                                 "and its emotional tone, with a modest preference for the requesting Project's own "
+                                 "footage. Origins name the Projects it came from; footage from elsewhere does not "
+                                 "document events in your Project. `fit` says whether it supports the request "
+                                 "literally, emotionally or metaphorically. Pass scope='library' when expanding "
                                  "these Segments.")
         return out
 
+    @staticmethod
+    def _fit(query: str, ranked: list, segments: list, evidence: dict, tones: dict, scopes: dict,
+             requesting: str | None) -> tuple[list, dict]:
+        """Re-rank library matches by content plus emotional fit, prefer the requesting Project's own footage
+        modestly, and explain each match. Segments that match neither content nor tone are not returned."""
+        wanted = tone.tones_in(query)
+        content = {seg["id"]: (score, best) for score, seg, best in ranked}
+        out, fits = [], {}
+        for seg in segments:
+            matched = [t for t in wanted if t in tones[seg["id"]]["tones"]]
+            score, best = content.get(seg["id"], (0.0, None))
+            if best is None and not matched:
+                continue
+            if best is None:  # matched on tone alone
+                why = next((t for t in tones[seg["id"]]["suggested"] if t["tone"] == matched[0]), None)
+                best = (0.0, "tone", f"{matched[0]}: {why['explanation']}" if why else
+                        f"{matched[0]}: chosen by the creator", why["evidence_ids"] if why else [])
+            own = requesting is not None and requesting in [m["project_id"] for m in scopes[seg["id"]]["origins"]]
+            total = (score + TONE_FIT_WEIGHT * len(matched)) * (PROJECT_PREFERENCE if own else 1.0)
+            kind = FIT_KIND.get(best[1], "literal")
+            text = clip_text(best[2])
+            explanation = {"literal": f"Shows or says what was asked for ({best[1]}): {text}",
+                           "metaphorical": f"Could stand for {text}",
+                           "emotional": f"Suggested tone {text}"}[kind]
+            if matched and kind != "emotional":
+                explanation += f" Emotional fit: {', '.join(matched)}."
+            origins = [m["name"] for m in scopes[seg["id"]]["origins"]]
+            fits[seg["id"]] = {
+                "kind": kind, "explanation": explanation, "tones_matched": matched, "evidence_ids": best[3],
+                "current_project": own,
+                "caution": None if own else (
+                    f"From {', '.join(origins) if origins else 'standalone library footage'}: illustrative B-roll "
+                    "that does not document events in your Project."),
+            }
+            out.append((total, seg, best))
+        out.sort(key=lambda r: -r[0])  # stable: equal scores keep source order
+        return out, fits
 
-def rank(query: str, segments: list, evidence: dict[str, list[tuple[str, str]]]) -> list[tuple]:
-    """(score, segment, best matching (score, kind, text)) for every Segment with evidence matching the query."""
-    wanted = terms(query)
+
+def rank(query: str, segments: list, evidence: dict[str, list[tuple]], ignore: frozenset = frozenset(),
+         prefer: frozenset = frozenset()) -> list[tuple]:
+    """(score, segment, shown matching (score, kind, text, evidence IDs)) for every Segment with evidence matching
+    the query, leaving out `ignore` words. The shown match is the best one of a `prefer` kind when there is one."""
+    wanted = [t for t in terms(query) if t not in ignore]
     phrase = f" {' '.join(words(query))} "
     ranked = []
     for seg in segments if wanted else []:
         scored = []
-        for kind, text in evidence[seg["id"]]:
+        for kind, text, ids in evidence[seg["id"]]:
             found = words(text)
             hits = sum(1 for t in wanted if matches(t, set(found)))
             if hits:
                 exact = phrase.strip() and phrase in f" {' '.join(found)} "
-                scored.append((WEIGHTS[kind] * hits + (2.0 * len(wanted) if exact else 0), kind, text))
+                scored.append((WEIGHTS[kind] * hits + (2.0 * len(wanted) if exact else 0), kind, text, ids))
         if scored:
             scored.sort(key=lambda s: -s[0])
             score = scored[0][0] + SUPPORTING_WEIGHT * sum(s[0] for s in scored[1:])
-            ranked.append((score, seg, scored[0]))
+            ranked.append((score, seg, next((s for s in scored if s[1] in prefer), scored[0])))
     ranked.sort(key=lambda r: -r[0])  # stable: equal scores keep source order
     return ranked

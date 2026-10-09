@@ -3,6 +3,7 @@ import Observation
 
 enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
     case all = "All Footage", aRoll = "A-roll", bRoll = "B-roll", needsReview = "Needs Review", excluded = "Excluded"
+    case reusable = "Reusable B-roll"
 
     var id: Self { self }
 
@@ -13,6 +14,7 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
         case .bRoll: "photo.on.rectangle"
         case .needsReview: "exclamationmark.bubble"
         case .excluded: "eye.slash"
+        case .reusable: "square.stack.3d.up"
         }
     }
 
@@ -23,6 +25,7 @@ enum FootageFilter: String, CaseIterable, Identifiable, Hashable {
         case .bRoll: clip.role == "b-roll"
         case .needsReview: clip.needsReview
         case .excluded: clip.excluded
+        case .reusable: clip.reuseAllowed && clip.segments.contains(where: \.isReusableBRoll)
         }
     }
 }
@@ -68,6 +71,9 @@ final class AppModel {
     var isCheckingReadiness = false
     var projects: [Project] = []
     var project: Project?
+    /// The browser shows reusable B-roll from the whole Footage library; `project` stays the Project being
+    /// edited, whose own footage library search prefers.
+    var showingLibrary = false
     var clips: [SourceClip] = []
     var filter: FootageFilter = .all
     /// Selected Source clips in the browser (Finder-style multiple selection).
@@ -218,6 +224,44 @@ final class AppModel {
         }
     }
 
+    /// Records the creator's emotional tones for one Segment (nil returns it to the suggestions).
+    func setTones(_ tones: [String]?, for segment: Segment) async {
+        do {
+            try await worker.setSegmentTones(segmentID: segment.id, tones: tones)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            errorMessage = "Could not change the segment's tone: \(error.localizedDescription)"
+        }
+    }
+
+    /// Ready clips with Segments not yet read for emotional tone.
+    func canEnrichTone(_ targets: [SourceClip]) -> Bool {
+        activity == nil && targets.contains { $0.status == .ready && $0.segments.contains { $0.tone.state == "not_analyzed" } }
+    }
+
+    /// Reads emotional tone for the chosen clips from their saved evidence, one after another, with progress.
+    /// Only what the creator asks for is enriched; nothing else in the library is upgraded.
+    func enrichTone(_ targets: [SourceClip]) async {
+        guard canEnrichTone(targets) else { return }
+        let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
+        activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
+        defer { activity = nil }
+        do {
+            guard await modelsReady() else { return }
+            let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
+                await MainActor.run { self?.track(event) }
+            }
+            _ = try await worker.enrichTone(projectID: showingLibrary ? nil : project?.id,
+                                            clipIDs: targets.map(\.id), onProgress: onProgress)
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            report(error)
+            try? await reload()
+        }
+    }
+
     /// Records the creator's role for one Segment (nil returns it to the suggested role).
     func setRole(_ role: String?, for segment: Segment) async {
         do {
@@ -270,8 +314,10 @@ final class AppModel {
     }
 
     func open(_ project: Project) async throws {
-        guard project.id != self.project?.id else { return }
+        guard project.id != self.project?.id || showingLibrary else { return }
         closePlayer()
+        showingLibrary = false
+        if filter == .reusable { filter = .all }
         self.project = project
         clips = []
         select(nil)
@@ -283,14 +329,33 @@ final class AppModel {
         await checkSources()
     }
 
+    /// Shows reusable B-roll from every Project and standalone library footage.
+    func openLibrary() async {
+        guard !showingLibrary else { return }
+        closePlayer()
+        showingLibrary = true
+        filter = .reusable
+        clips = []
+        select(nil)
+        selectedHit = nil
+        searchText = ""
+        searchResults = nil
+        do {
+            try await reload()
+            select(visibleClips.first?.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Re-verifies every analysed clip's original (moved, deleted, edited, or restored) and the analysis
     /// settings, then shows the result. Skipped while an import or retry is writing the index.
     func checkSources() async {
-        guard let project, activity == nil else { return }
+        guard project != nil || showingLibrary, activity == nil else { return }
         isCheckingSources = true
         defer { isCheckingSources = false }
         do {
-            try await worker.checkSources(projectID: project.id)
+            try await worker.checkSources(projectID: showingLibrary ? nil : project?.id)
             try await reload()
         } catch {
             errorMessage = "Could not check the original files: \(error.localizedDescription)"
@@ -305,7 +370,7 @@ final class AppModel {
     /// Re-analyses clips from their originals with real progress. Each keeps its ID, note, and exclusion;
     /// unchanged content is reused without inference, and a missing original is reported, not analysed.
     func retry(_ targets: [SourceClip]) async {
-        guard let project, canRetry(targets) else { return }
+        guard project != nil || showingLibrary, canRetry(targets) else { return }
         let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
         activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
         defer { activity = nil }
@@ -314,7 +379,8 @@ final class AppModel {
             let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
                 await MainActor.run { self?.track(event) }
             }
-            _ = try await worker.retry(projectID: project.id, clipIDs: targets.map(\.id), onProgress: onProgress)
+            _ = try await worker.retry(projectID: showingLibrary ? nil : project?.id, clipIDs: targets.map(\.id),
+                                       onProgress: onProgress)
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
         } catch {
@@ -416,10 +482,10 @@ final class AppModel {
     }
 
     func reload() async throws {
-        guard let project else { return }
+        guard project != nil || showingLibrary else { return }
         reloadGeneration += 1
         let generation = reloadGeneration
-        let snapshot = try await worker.snapshot(projectID: project.id)
+        let snapshot = try await worker.snapshot(projectID: showingLibrary ? nil : project?.id)
         guard generation == reloadGeneration else { return }  // a newer reload is already on its way
         clips = snapshot.clips
         // Drop clips that no longer exist; never invent a selection the creator cleared.
@@ -432,14 +498,14 @@ final class AppModel {
     /// another clip is still being analysed.
     func search() async {
         let query = trimmedQuery
-        guard let project, !query.isEmpty else {
+        guard project != nil || showingLibrary, !query.isEmpty else {
             searchResults = nil
             return
         }
         isSearching = true
         defer { if query == trimmedQuery { isSearching = false } }
         do {
-            let page = try await worker.search(projectID: project.id, query: query)
+            let page = try await worker.search(projectID: project?.id, query: query, library: showingLibrary)
             if page.query == trimmedQuery { searchResults = page }
         } catch is CancellationError {
             // Superseded by newer typing; its worker process was stopped.
@@ -516,6 +582,9 @@ final class AppModel {
         case "ready": return event.reused == true ? "Reused saved context" : "Ready"
         case "failed": return "Failed"
         case "missing": return "Original not found"
+        case "reading_tone": return "Reading emotional tone" + step
+        case "tone_skipped": return "Skipped: not ready"
+        case "tone_failed": return "Tone not read"
         default: return event.stage ?? "Working"
         }
     }

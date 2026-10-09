@@ -63,12 +63,25 @@ class ScriptedVision:
     identity = {"engine": "scripted-vision", "model": "fixture"}
 
     def __init__(self, scripts: dict[str, str], fail: set[str] = frozenset(),
-                 facing_camera: set[str] = frozenset({"a-roll.mp4"})):
+                 facing_camera: set[str] = frozenset({"a-roll.mp4"}), tones: dict[str, dict] | None = None):
         self.scripts = scripts
         self.fail = set(fail)
         self.facing_camera = set(facing_camera)
+        self.tones = tones or {}
         self.calls = 0
+        self.tone_calls = 0
         self.on_describe = lambda request: None
+
+    def describe_tone(self, request):
+        """Tone readings scripted per filename ({"tones": [(tone, why)], "connotations": [(idea, why)]}), each
+        citing every frame it was given."""
+        self.tone_calls += 1
+        script = self.tones.get(request.original_filename, {})
+        cited = [f.id for f in request.frames] or [t.id for t in request.transcript]
+        return {"tones": [{"tone": t, "explanation": why, "evidence_ids": cited} for t, why in script.get("tones", [])],
+                "connotations": [{"idea": i, "explanation": why, "evidence_ids": cited}
+                                 for i, why in script.get("connotations", [])],
+                "depicted_emotion": script.get("depicted_emotion", "")}
 
     def describe(self, request):
         from clipco_worker.vision import InferenceError
@@ -100,6 +113,9 @@ class RecordedVision:
         self.fail = fail
         self.calls = 0
         self.requests = []
+
+    def describe_tone(self, request):
+        return {"tones": [], "connotations": [], "depicted_emotion": ""}
 
     def describe(self, request):
         self.calls += 1

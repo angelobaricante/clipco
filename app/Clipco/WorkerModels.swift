@@ -27,7 +27,8 @@ struct Project: Decodable, Identifiable, Hashable, Sendable {
 }
 
 struct Snapshot: Decodable, Sendable {
-    var project: Project
+    /// Nil for the Footage library, which no Project owns.
+    var project: Project?
     var clips: [SourceClip]
 }
 
@@ -171,7 +172,49 @@ struct Segment: Decodable, Identifiable, Hashable, Sendable {
     var observations: [Observation]
     var interpretation: Interpretation
     var role: SegmentRole
+    var tone: SegmentTone
     var relationships: [RelatedSegment]
+
+    /// Offered as B-roll outside its own Projects (when the clip also allows reuse).
+    var isReusableBRoll: Bool { role.effective == "b-roll" }
+}
+
+/// Suggested emotional tone: an interpretation of sampled evidence, never an observation or a guarantee. The
+/// creator's tones are kept apart from the model's suggestions.
+struct SegmentTone: Decodable, Hashable, Sendable {
+    struct Suggestion: Decodable, Hashable, Sendable {
+        var tone: String
+        var explanation: String
+        var evidenceIds: [String]
+    }
+
+    struct Connotation: Decodable, Hashable, Sendable {
+        var idea: String
+        var explanation: String
+        var evidenceIds: [String]
+    }
+
+    /// not_analyzed, none_supported, suggested, or creator.
+    var state: String
+    /// What counts for discovery: the creator's tones when set, otherwise the suggestions.
+    var tones: [String]
+    var suggested: [Suggestion]
+    var connotations: [Connotation]
+    var depictedEmotion: String?
+    var creator: [String]?
+    var model: String?
+    var limitations: String
+
+    static let vocabulary = ["calm", "hopeful", "joyful", "playful", "warm", "nostalgic", "melancholic", "tense",
+                             "energetic", "awe", "satisfying", "curious"]
+
+    var summary: String {
+        switch state {
+        case "not_analyzed": "Not analyzed"
+        case "none_supported": "No supported tone"
+        default: tones.isEmpty ? "None (set by you)" : tones.map(\.capitalized).joined(separator: ", ")
+        }
+    }
 }
 
 /// Result of the app's Codex connection check: a real MCP session with clipco-mcp.
@@ -210,6 +253,25 @@ struct SearchPage: Decodable, Sendable {
 }
 
 struct SearchHit: Decodable, Identifiable, Hashable, Sendable {
+    /// How a library result supports the request, and a caution when it comes from elsewhere.
+    struct Fit: Decodable, Hashable, Sendable {
+        var kind: String
+        var explanation: String
+        var tonesMatched: [String]
+        var currentProject: Bool
+        var caution: String?
+    }
+
+    struct Origin: Decodable, Hashable, Sendable {
+        var projectId: String
+        var name: String
+    }
+
+    struct Tone: Decodable, Hashable, Sendable {
+        var state: String
+        var tones: [String]
+    }
+
     var segmentId: String
     var clipId: String
     var originalFilename: String
@@ -222,6 +284,9 @@ struct SearchHit: Decodable, Identifiable, Hashable, Sendable {
     var excluded: Bool
     var hasCreatorNote: Bool
     var relationships: [RelatedSegment]
+    var tone: Tone?
+    var fit: Fit?
+    var origins: [Origin]?
 
     var id: String { segmentId }
 

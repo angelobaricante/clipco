@@ -17,9 +17,10 @@ struct ContentView: View {
                         PlayerOverlay(clip: clip)
                     }
                 }
-                .navigationTitle(model.project?.name ?? "Clipco")
+                .navigationTitle(model.showingLibrary ? "Reusable B-roll" : model.project?.name ?? "Clipco")
                 .navigationSubtitle(model.trimmedQuery.isEmpty ? model.filter.rawValue : "Search")
-                .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search footage context")
+                .searchable(text: $model.searchText, placement: .toolbar,
+                            prompt: model.showingLibrary ? "Describe the shot, mood or idea" : "Search footage context")
                 .searchFocused($searchFocused)
                 .onChange(of: model.searchFocusRequest) { searchFocused = true }
                 .task(id: model.searchText) {
@@ -127,6 +128,7 @@ struct ProjectDialogs: ViewModifier {
 enum SidebarItem: Hashable {
     case filter(FootageFilter)
     case project(Project.ID)
+    case library
 }
 
 struct SidebarView: View {
@@ -135,10 +137,19 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
         List(selection: Binding<SidebarItem?>(
-            get: { .filter(model.filter) },
+            get: { model.showingLibrary ? .library : .filter(model.filter) },
             set: { item in
                 switch item {
-                case .filter(let filter): model.filter = filter
+                case .library: Task { await model.openLibrary() }
+                case .filter(let filter):
+                    if model.showingLibrary, let project = model.project {
+                        Task {
+                            do { try await model.open(project) } catch { model.errorMessage = error.localizedDescription }
+                            model.filter = filter
+                        }
+                    } else {
+                        model.filter = filter
+                    }
                 case .project(let id):
                     guard let project = model.projects.first(where: { $0.id == id }) else { return }
                     Task {
@@ -150,18 +161,23 @@ struct SidebarView: View {
         ) {
             Section(model.project?.name ?? "No Project") {
                 ForEach([FootageFilter.all, .aRoll, .bRoll]) { filter in
-                    FilterRow(filter: filter, count: model.count(filter))
+                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
                 }
             }
             Section("Review") {
                 ForEach([FootageFilter.needsReview, .excluded]) { filter in
-                    FilterRow(filter: filter, count: model.count(filter))
+                    FilterRow(filter: filter, count: model.showingLibrary ? nil : model.count(filter))
                 }
+            }
+            Section("Footage Library") {
+                Label(FootageFilter.reusable.rawValue, systemImage: FootageFilter.reusable.symbol)
+                    .tag(SidebarItem.library)
+                    .help("B-roll you allow to be reused, from every Project and library-only footage")
             }
             if !model.projects.isEmpty {
                 Section("Projects") {
                     ForEach(model.projects) { project in
-                        let isOpen = project.id == model.project?.id
+                        let isOpen = project.id == model.project?.id && !model.showingLibrary
                         Label(project.name, systemImage: isOpen ? "folder.fill" : "folder")
                             .fontWeight(isOpen ? .semibold : .regular)
                             .tag(SidebarItem.project(project.id))
@@ -198,13 +214,14 @@ struct SidebarView: View {
 
 struct FilterRow: View {
     let filter: FootageFilter
-    let count: Int
+    /// Nil while the library is shown, whose clips are not this Project's.
+    let count: Int?
 
     var body: some View {
         Label(filter.rawValue, systemImage: filter.symbol)
-            .badge(count)
+            .badge(count ?? 0)
             .tag(SidebarItem.filter(filter))
-            .accessibilityLabel("\(filter.rawValue), \(count) \(count == 1 ? "clip" : "clips")")
+            .accessibilityLabel(count.map { "\(filter.rawValue), \($0) \($0 == 1 ? "clip" : "clips")" } ?? filter.rawValue)
     }
 }
 

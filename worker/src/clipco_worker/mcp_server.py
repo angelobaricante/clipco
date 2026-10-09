@@ -63,7 +63,7 @@ def build(home: Path) -> MCPServer:
 
     @server.tool(annotations=READ_ONLY)
     def search_footage(query: str, project_id: str | None = None, scope: str = "project", limit: int = 5,
-                       offset: int = 0, include_excluded: bool = False) -> CallToolResult:
+                       offset: int = 0, include_excluded: bool = False, tone: str | None = None) -> CallToolResult:
         """Find relevant Segments in saved footage context (no model is started).
 
         scope='project' (default) searches one Project's footage and needs project_id. scope='library'
@@ -73,17 +73,23 @@ def build(home: Path) -> MCPServer:
         ranges and the evidence each excerpt comes from. When `truncated` is true, call again with
         `next_offset`. An empty `results` list means nothing in the saved index matched. Clips the creator
         excluded are skipped unless include_excluded is true (project scope only); creator notes are searched
-        as `creator_note` evidence.
+        as `creator_note` evidence. Every result carries its emotional tone state: 'not_analyzed' is unknown
+        tone, not a neutral one. Library results are ranked by suitability and emotional fit (tone words in the
+        query count) with a modest preference for project_id's own footage, and each has a `fit` saying whether
+        it supports the request literally, emotionally or metaphorically, with a caution when it comes from
+        elsewhere. `tone` (e.g. 'calm', 'hopeful', 'tense') keeps only Segments with that tone; footage not yet
+        analysed for tone never satisfies it.
         """
         return guarded(lambda: result(index.search(project_id, query, limit, offset,
-                                                   include_excluded and scope == "project", scope)))
+                                                   include_excluded and scope == "project", scope, tone)))
 
     @server.tool(annotations=READ_ONLY)
     def get_segment_context(segment_id: str, window_seconds: float = 15.0, project_id: str | None = None,
                             scope: str | None = None) -> CallToolResult:
         """Expand one Segment: timestamped transcript (plus up to window_seconds either side, max 120),
         sampled-frame observations, the model interpretation with the evidence it cites, its footage role,
-        provenance, relationships, creator notes, and whether the creator excluded the clip. Times are
+        provenance, relationships, creator notes, suggested emotional tone with the evidence it cites and its
+        limitations, and whether the creator excluded the clip. Times are
         seconds from the start of the original Source clip. Pass the project_id or scope='library' the
         Segment was found with; notes and relationships are limited to that scope.
         """
