@@ -8,7 +8,7 @@ The approved MVP uses native SwiftUI, a local Python worker, Ollama/Qwen3.5, whi
 
 ## Project status
 
-Task #2 (one real clip through local analysis and native review) is in progress. Real inference, native UI behavior, offline operation, and savings still need to be demonstrated. The image below is an approved browser design study with illustrative media, not a running native app.
+Task #2 (one real clip through local analysis and native review) is complete. Task #3 (Codex retrieval through MCP) is in progress. Full-Project discovery, offline operation, and savings still need to be demonstrated. The image below is an approved browser design study with illustrative media, not a running native app.
 
 ![Approved macOS workspace direction](docs/design/macos-workspace.jpg)
 
@@ -68,3 +68,17 @@ uv run pytest -m real -s      # real whisper.cpp + Ollama smoke test; prints a t
 Speech language is detected per clip (`CLIPCON_SPEECH_LANGUAGE=auto`); force it with `en` or `tl`. To fall back to the smaller English-only model, download `ggml-small.en.bin` and set `CLIPCON_WHISPER_MODEL=~/.clipcon/models/ggml-small.en.bin`. Tagalog/Taglish quality is only as good as measured on real footage; run `CLIPCON_TAGALOG_CLIP=/path/clip.mp4 uv run pytest -m real -s -k tagalog`.
 
 The worker CLI is also usable directly: `uv run clipcon-worker readiness|warmup|projects|create-project|import|snapshot`.
+
+## Connect Codex (task #3: MCP retrieval)
+
+`clipcon-mcp` is a read-only stdio MCP server over the saved index. It loads no model and does not need the app to be running. Its five tools are `get_project_overview`, `search_footage`, `get_segment_context`, `get_segment_preview`, and `resolve_media`. Each tool takes an explicit `project_id` or `segment_id`.
+
+Open the setup sheet by clicking the readiness badge in the sidebar. The **Codex connection (MCP)** section runs a live MCP session against the index and shows the exact registration command. On this Mac the command is:
+
+```sh
+codex mcp add clipcon -- ~/clipcon/worker/.venv/bin/clipcon-mcp --home "$HOME/Library/Application Support/Clipcon"
+```
+
+The tools are annotated read-only, so Codex runs them without approval prompts. `resolve_media` returns a path only when the original file is still present and unchanged (same size and modification time). A returned path is only a locator: Codex reads the file with its own normal access to this Mac.
+
+Verified working: Python MCP SDK `mcp` 2.3.0 (negotiated protocol `2026-07-28`) with `codex-cli 0.162.0-alpha.2`, the CLI bundled in the ChatGPT app. The Homebrew `codex-cli 0.154.0` completed the MCP handshake. Its turn then failed because that CLI rejected the account's configured default model (`gpt-6.1-sol`), so no tool call was observed through it. Check it yourself with `clipcon-worker mcp-status`.

@@ -13,10 +13,10 @@ from pathlib import Path
 
 from .pipeline import Worker
 from .readiness import check, warm_up
+from .retrieval import default_home
 from .speech import WhisperCppSpeech
 from .vision import OllamaVision
 
-DEFAULT_HOME = Path.home() / "Library" / "Application Support" / "Clipcon"
 DEFAULT_WHISPER = Path.home() / ".clipcon" / "models" / "ggml-large-v3-turbo.bin"  # multilingual
 DEFAULT_VISION = "qwen3.5:4b-q4_K_M"
 
@@ -28,7 +28,7 @@ def emit(event: str, **payload) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="clipcon-worker")
-    parser.add_argument("--home", type=Path, default=Path(os.environ.get("CLIPCON_HOME", DEFAULT_HOME)))
+    parser.add_argument("--home", type=Path, default=default_home())
     parser.add_argument("--whisper-model", type=Path,
                         default=Path(os.environ.get("CLIPCON_WHISPER_MODEL", DEFAULT_WHISPER)))
     parser.add_argument("--speech-language", default=os.environ.get("CLIPCON_SPEECH_LANGUAGE", "auto"),
@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("readiness")
     sub.add_parser("warmup")
     sub.add_parser("projects")
+    sub.add_parser("mcp-status")
     p = sub.add_parser("create-project")
     p.add_argument("--name", required=True)
     p.add_argument("--context", default="")
@@ -50,7 +51,10 @@ def main(argv: list[str] | None = None) -> int:
 
     ollama = OllamaVision(args.vision_model)
     try:
-        if args.command == "readiness":
+        if args.command == "mcp-status":
+            from .mcp_check import connection_status
+            emit("result", mcp=connection_status(args.home))
+        elif args.command == "readiness":
             emit("result", readiness=check(ollama, args.whisper_model))
         elif args.command == "warmup":
             final = warm_up(ollama, args.whisper_model, progress=lambda s: emit("readiness", readiness=s))

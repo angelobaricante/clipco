@@ -91,9 +91,10 @@ struct SetupSheet: View {
                 Text("Clipcon talks to Ollama on 127.0.0.1 only and never falls back to cloud inference.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            CodexSection()
         }
         .formStyle(.grouped)
-        .frame(width: 480)
+        .frame(width: 560)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             ToolbarItem {
@@ -105,5 +106,68 @@ struct SetupSheet: View {
                     .disabled(model.readiness?.state != .cold && model.readiness?.state != .inferenceFailed)
             }
         }
+    }
+}
+
+/// Codex MCP setup: the installed helper, the command that registers it, and a live connection test.
+struct CodexSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Section("Codex connection (MCP)") {
+            if let s = model.mcpStatus {
+                LabeledContent("Test") {
+                    if s.ok {
+                        Label("Connected · \(s.tools.count) tools · \(s.projectCount ?? 0) Projects",
+                              systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else {
+                        Label("Failed", systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+                    }
+                }
+                if let error = s.error { Text(error).font(.caption).textSelection(.enabled) }
+                if s.ok, let connect = s.connectMs, let overview = s.overviewMs {
+                    LabeledContent("Response", value: "start \(connect) ms · overview \(overview) ms")
+                }
+                LabeledContent("Helper") {
+                    Text(s.serverCommand.first ?? "").font(.caption.monospaced()).textSelection(.enabled)
+                        .lineLimit(2).truncationMode(.middle)
+                }
+                LabeledContent("Codex") {
+                    Text(codexState(s)).foregroundStyle(s.codex.registered && !s.codexRegistrationDiffers
+                                                        ? Color.primary : Color.orange)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Register Clipcon with Codex in Terminal:").font(.callout)
+                    Text(s.addCommand).font(.caption.monospaced()).textSelection(.enabled)
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
+                    HStack {
+                        Button("Copy Command", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(s.addCommand, forType: .string)
+                        }
+                        Spacer()
+                        Text("MCP SDK \(s.sdkVersion) · protocol \(s.protocolVersion ?? "–")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("The helper reads the saved index only, so Codex can search while Clipcon is closed. "
+                     + "File paths it returns are locators, not new file permissions.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if model.isCheckingMcp {
+                ProgressView("Testing connection…").controlSize(.small)
+            }
+            Button("Test Connection") { Task { await model.checkMcp() } }
+                .disabled(model.isCheckingMcp)
+        }
+        .task { if model.mcpStatus == nil { await model.checkMcp() } }
+    }
+
+    private func codexState(_ s: McpStatus) -> String {
+        guard s.codex.path != nil else { return "Codex CLI not found" }
+        if let error = s.codex.error { return "Could not query Codex: \(error)" }
+        let version = s.codex.version ?? "unknown version"
+        if s.codexRegistrationDiffers { return "\(version) · registered with a different command" }
+        return s.codex.registered ? "\(version) · Clipcon registered" : "\(version) · not registered yet"
     }
 }

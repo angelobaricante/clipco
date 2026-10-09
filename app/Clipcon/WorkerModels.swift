@@ -112,6 +112,33 @@ struct Segment: Decodable, Identifiable, Hashable, Sendable {
     var interpretation: Interpretation
 }
 
+/// Result of the app's Codex connection check: a real MCP session with clipcon-mcp.
+struct McpStatus: Decodable, Equatable, Sendable {
+    struct Codex: Decodable, Equatable, Sendable {
+        var path: String?
+        var version: String?
+        var registered: Bool
+        var registeredCommand: [String]?
+        var error: String?
+    }
+
+    var ok: Bool
+    var error: String?
+    var serverCommand: [String]
+    var addCommand: String
+    var sdkVersion: String
+    var serverVersion: String?
+    var protocolVersion: String?
+    var tools: [String]
+    var projectCount: Int?
+    var connectMs: Int?
+    var overviewMs: Int?
+    var codex: Codex
+
+    /// Codex has a `clipcon` server, but it launches something other than this installation.
+    var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }
+}
+
 /// One stdout line from the worker.
 struct WorkerEvent: Decodable, Sendable {
     var event: String
@@ -122,6 +149,7 @@ struct WorkerEvent: Decodable, Sendable {
     var project: Project?
     var projects: [Project]?
     var snapshot: Snapshot?
+    var mcp: McpStatus?
     var clipId: String?
     var reused: Bool?
     var elapsed: Double?

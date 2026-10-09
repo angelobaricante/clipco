@@ -98,6 +98,11 @@ struct WorkerClient: Sendable {
         return r
     }
 
+    func mcpStatus() async throws -> McpStatus {
+        guard let s = try await run(["mcp-status"]).mcp else { throw WorkerError.noResult }
+        return s
+    }
+
     func projects() async throws -> [Project] {
         try await run(["projects"]).projects ?? []
     }
