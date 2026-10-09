@@ -1,0 +1,29 @@
+== enqueue mixed drop (folder + overlapping file + unsupported + missing)
+04:31:03
+jobs ['DJI_20261001124917_0006_D.MP4', 'IMG_6188.MOV', 'IMG_6189.MOV'] skipped [{'path': '/private/tmp/claude-501/-Users-angelobaricante-clipco/10c92cbb-2ea8-4ccc-8378-cfabc58316b1/scratchpad/realq/drop/notes.txt', 'reason': 'unsupported'}, {'path': '/private/tmp/claude-501/-Users-angelobaricante-clipco/10c92cbb-2ea8-4ccc-8378-cfabc58316b1/scratchpad/realq/gone.mp4', 'reason': 'inaccessible'}]
+{'DJI_20261001124917_0006_D.MP4': ('queued', None), 'IMG_6188.MOV': ('queued', None), 'IMG_6189.MOV': ('queued', None)} paused= False running= False
+== run-queue (background)
+== cancel active job job_d8717b809ab84996 while transcribing
+18976 whisper-cli -m /Users/angelobaricante/.clipco/models/ggml-large-v3-turbo.bin -f /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmp5zhgmvx3/audio.wav -l auto --prompt Hello, everyone. Kumusta kayo? Today, ipapakita ko kung paano ito gumagana. -mc 64 -oj -of /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmpcdi8b37f/transcript -np --vad -vm /Users/angelobaricante/.clipco/models/ggml-silero-v5.1.2.bin
+cancelled after 0.4s
+18995 whisper-cli -m /Users/angelobaricante/.clipco/models/ggml-large-v3-turbo.bin -f /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmplevmjb1q/audio.wav -l auto --prompt Hello, everyone. Kumusta kayo? Today, ipapakita ko kung paano ito gumagana. -mc 64 -oj -of /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmphdcvtmno/transcript -np --vad -vm /Users/angelobaricante/.clipco/models/ggml-silero-v5.1.2.bin
+{'DJI_20261001124917_0006_D.MP4': ('cancelled', 'transcribing'), 'IMG_6188.MOV': ('active', 'transcribing'), 'IMG_6189.MOV': ('queued', None)} paused= False running= True
+== pause while the next job runs
+{'DJI_20261001124917_0006_D.MP4': ('cancelled', 'transcribing'), 'IMG_6188.MOV': ('active', 'describing'), 'IMG_6189.MOV': ('queued', None)} paused= True running= True
+runner exited (paused): 0
+{'DJI_20261001124917_0006_D.MP4': ('cancelled', 'transcribing'), 'IMG_6188.MOV': ('completed', 'ready'), 'IMG_6189.MOV': ('queued', None)} paused= True running= False
+== resume, then quit the runner (SIGTERM, as the app does) mid-job
+(no whisper-cli/ffmpeg processes)
+runner exited: 143
+(no whisper-cli/ffmpeg processes)
+{'DJI_20261001124917_0006_D.MP4': ('cancelled', 'transcribing'), 'IMG_6188.MOV': ('completed', 'ready'), 'IMG_6189.MOV': ('active', 'describing')} paused= False running= True
+== relaunch: reconcile, then explicit resume
+{'DJI_20261001124917_0006_D.MP4': ('cancelled', 'transcribing'), 'IMG_6188.MOV': ('completed', 'ready'), 'IMG_6189.MOV': ('active', 'describing')} paused= False running= True
+04:31:52
+04:31:52
+{'DJI_20261001124917_0006_D.MP4': ('queued', None), 'IMG_6188.MOV': ('completed', 'ready'), 'IMG_6189.MOV': ('active', 'describing')} paused= False running= True
+== MCP overview of the Project
+clipco-mcp: serving /private/tmp/claude-501/-Users-angelobaricante-clipco/10c92cbb-2ea8-4ccc-8378-cfabc58316b1/scratchpad/realq/home/index.sqlite over stdio
+DJI_20261001124917_0006_D.MP4 failed 0
+IMG_6188.MOV ready 2
+IMG_6189.MOV indexing 0

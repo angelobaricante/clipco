@@ -14,6 +14,9 @@ These were checked by the agent on the M5/24 GB development Mac. **The creator h
   - Explicit `enrich-tone` uses only the saved frames and transcript, with 0 speech calls and 0 new descriptions.
   - Already enriched footage is not read again.
 - **Creator tones** are stored apart from the model's suggestions (`state: creator`). The suggestions and the evidence are not rewritten, and the creator can revert to the suggestions.
+- **After re-analysis:** a correction whose Segment range a re-analysis no longer has is kept and shown (`unmatched_tone_corrections`).
+- **Tone during analysis:** a new import or re-analysis reads tone as part of the analysis, at the creator's request on 2026-10-10. Footage analysed before tone existed stays `not_analyzed` until the creator asks for `enrich-tone` (the inspector's Read Emotional Tone); launch and search never upgrade it. A tone failure leaves the published analysis intact, with tone Not analyzed.
+- **Literal fit wording:** a literal fit names what it rests on. A model interpretation or label is described as the model's, never as what the footage shows.
 - **Ranking**
   - Better-fitting footage from another Project outranks weaker footage from the current Project.
   - When fits are comparable, the requesting Project's own footage leads, whichever Project is requesting.

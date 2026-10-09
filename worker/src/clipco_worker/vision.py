@@ -7,10 +7,15 @@ those IDs; unsupported references are rejected rather than trusted.
 import base64
 import json
 import os
-import urllib.error
-import urllib.request
+import http.client
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from . import cancel
+
+if TYPE_CHECKING:
+    from .tone import ToneRequest
 
 
 class InferenceError(Exception):
@@ -166,18 +171,24 @@ class OllamaVision:
 
     def _post(self, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
         self._refuse_remote()
-        url = f"http://{self.host}{path}"
+        hostname, _, port = self.host.rpartition(":")
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"},
-                                     method="POST" if body is not None else "GET")
+        conn = http.client.HTTPConnection(hostname.strip("[]") or self.host, int(port or 11434),
+                                          timeout=timeout or self.timeout)
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
-                return json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode(errors="replace")[-400:]
-            raise InferenceError(f"Ollama {path} returned {e.code}: {detail}") from e
-        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            with cancel.connection(conn):  # cancelling the job disconnects, which stops Ollama generating
+                conn.request("POST" if body is not None else "GET", path, body=data,
+                             headers={"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                raw = resp.read()
+        except (OSError, http.client.HTTPException) as e:
+            cancel.check()
             raise ServiceUnavailable(f"Ollama is not reachable at {self.host}: {e}") from e
+        finally:
+            conn.close()
+        if resp.status >= 400:
+            raise InferenceError(f"Ollama {path} returned {resp.status}: {raw.decode(errors='replace')[-400:]}")
+        return json.loads(raw)
 
     def version(self) -> str:
         return self._post("/api/version", timeout=3)["version"]
@@ -203,7 +214,7 @@ class OllamaVision:
     def describe(self, request: SegmentRequest) -> dict:
         return self._chat(SCHEMA, SYSTEM_PROMPT, build_prompt(request), request.frames)
 
-    def describe_tone(self, request) -> dict:
+    def describe_tone(self, request: "ToneRequest") -> dict:
         """Suggested emotional tone for one Segment from its saved frames, observations and transcript."""
         from . import tone
 

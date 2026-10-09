@@ -23,6 +23,31 @@ DEFAULT_VAD = Path.home() / ".clipco" / "models" / "ggml-silero-v5.1.2.bin"  # v
 DEFAULT_VISION = "qwen3.5:4b-q4_K_M"
 
 
+QUEUE_COMMANDS = ("enqueue", "enqueue-clips", "run-queue", "jobs", "reconcile", "pause", "resume", "clear-jobs",
+                  "cancel", "retry-jobs")
+
+
+def blocker(ollama, whisper_model: Path, vad_model: Path) -> dict | None:
+    """None when queued analysis can start; otherwise the readiness that keeps it waiting. An installed model
+    that is not loaded is loaded (nothing is downloaded and no other model is substituted)."""
+    if memory_pressure() == "critical":  # temporary pressure: wait rather than start a model-heavy job
+        return {"state": "resource_pressure", "detail": "The Mac is under critical memory pressure.",
+                "guidance": "Close other apps, then resume the queue."}
+    state = warm_up(ollama, whisper_model, vad_model)
+    return None if state["state"] == "ready" else state
+
+
+def memory_pressure() -> str:
+    """macOS memory pressure level: normal, warning or critical (normal if it cannot be read)."""
+    import subprocess
+    try:
+        level = subprocess.run(["sysctl", "-n", "kern.memorystatus_vm_pressure_level"], capture_output=True,
+                               text=True, timeout=2).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "normal"
+    return {"2": "warning", "4": "critical"}.get(level, "normal")
+
+
 def emit(event: str, **payload) -> None:
     sys.stdout.write(json.dumps({"event": event, **payload}) + "\n")
     sys.stdout.flush()
@@ -43,6 +68,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("warmup")
     sub.add_parser("projects")
     sub.add_parser("mcp-status")
+    p = sub.add_parser("connect-agent", help="register Clipco with a local editing agent")
+    p.add_argument("--client", choices=["codex", "claude-code", "claude-desktop"], required=True)
+    p = sub.add_parser("disconnect-agent", help="remove only Clipco from a local editing agent")
+    p.add_argument("--client", choices=["codex", "claude-code", "claude-desktop"], required=True)
     p = sub.add_parser("create-project")
     p.add_argument("--name", required=True)
     p.add_argument("--context", default="")
@@ -100,6 +129,24 @@ def main(argv: list[str] | None = None) -> int:
     destination(p)
     p.add_argument("--clip", required=True)
     p.add_argument("source", type=Path)
+    # The recoverable analysis queue (Sequential): requests register footage at once; run-queue does the work.
+    p = sub.add_parser("enqueue", help="register dropped/chosen videos and folders now and queue their analysis")
+    destination(p)
+    p.add_argument("source", type=Path, nargs="+", metavar="file-or-folder")
+    p = sub.add_parser("enqueue-clips", help="queue re-analysis or tone reading of clips the destination has")
+    destination(p)
+    p.add_argument("--operation", required=True, choices=["reanalyse", "enrich_tone"])
+    p.add_argument("clip_ids", nargs="+")
+    sub.add_parser("run-queue", help="run queued jobs one at a time until none is left, paused, or setup is missing")
+    sub.add_parser("jobs", help="list analysis jobs and the queue state")
+    sub.add_parser("reconcile", help="after a restart: mark work left by a stopped runner interrupted")
+    sub.add_parser("pause", help="start no new jobs; the active one finishes")
+    sub.add_parser("resume", help="un-pause and queue interrupted and waiting jobs again")
+    sub.add_parser("clear-jobs", help="forget completed and cancelled jobs")
+    for name, help_text in (("cancel", "cancel queued or active jobs (footage and saved context are kept)"),
+                            ("retry-jobs", "queue failed, cancelled or interrupted jobs again")):
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument("job_ids", nargs="+")
     p = sub.add_parser("offline-proof",
                        help="with networking off: index one new clip live, search it, and save an evidence report")
     p.add_argument("--project", required=True)
@@ -115,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=SEARCH_PAGE)
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--include-excluded", action="store_true", help="also match clips the creator excluded")
-    p.add_argument("--tone", help="library scope: only Segments with this emotional tone")
+    p.add_argument("--tone", help="only Segments with this emotional tone (never footage not yet analysed for tone)")
     args = parser.parse_args(argv)
     if getattr(args, "library", False):
         args.project = None
@@ -124,6 +171,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "mcp-status":
             from .mcp_check import connection_status
+            emit("result", mcp=connection_status(args.home))
+        elif args.command in ("connect-agent", "disconnect-agent"):
+            from .mcp_check import connection_status
+            from .agent_connections import connect, disconnect
+            status = connection_status(args.home)
+            if args.command == "connect-agent" and not status["ok"]:
+                raise ValueError("Clipco's footage tools are unavailable. Check local setup before connecting.")
+            action = connect if args.command == "connect-agent" else disconnect
+            action(args.client, status["server_command"])
             emit("result", mcp=connection_status(args.home))
         elif args.command == "search":
             emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset,
@@ -201,6 +257,23 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "relink":
                 emit("result", **worker.relink(args.project, worker.store.resolve_clip(args.clip, args.project),
                                                args.source))
+            elif args.command in QUEUE_COMMANDS:
+                from .jobs import JobQueue
+                queue = JobQueue(worker, ready=lambda: blocker(ollama, args.whisper_model, args.vad_model))
+                if args.command == "enqueue":
+                    emit("result", **queue.enqueue_import(args.project, args.source))
+                elif args.command == "enqueue-clips":
+                    clip_ids = [worker.store.resolve_clip(c, args.project) for c in args.clip_ids]
+                    emit("result", **queue.enqueue(args.operation, args.project, clip_ids))
+                elif args.command == "run-queue":
+                    import signal
+                    signal.signal(signal.SIGTERM, lambda signum, frame: queue.stop())  # the app quitting
+                    emit("result", **queue.run(progress=lambda stage, detail: emit("progress", stage=stage, **detail)))
+                else:
+                    emit("result", **{"jobs": queue.list, "reconcile": queue.reconcile, "pause": queue.pause,
+                                      "resume": queue.resume, "clear-jobs": queue.clear_finished,
+                                      "cancel": lambda: queue.cancel(args.job_ids),
+                                      "retry-jobs": lambda: queue.retry(args.job_ids)}[args.command]())
             elif args.command in ("import", "import-sources"):
                 started = time.monotonic()
                 run = worker.import_clip if args.command == "import" else worker.import_sources

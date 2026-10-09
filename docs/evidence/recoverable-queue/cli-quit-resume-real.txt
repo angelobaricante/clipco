@@ -1,0 +1,15 @@
+== while transcribing:
+19686 whisper-cli -m /Users/angelobaricante/.clipco/models/ggml-large-v3-turbo.bin -f /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmp9svn07py/audio.wav -l auto --prompt Hello, everyone. Kumusta kayo? Today, ipapakita ko kung paano ito gumagana. -mc 64 -oj -of /var/folders/28/djpvdkh57pnfmv4tv1bdxvjm0000gn/T/tmp1vkuxtgv/transcript -np --vad -vm /Users/angelobaricante/.clipco/models/ggml-silero-v5.1.2.bin
+runner exit code: 0
+(no whisper-cli/ffmpeg processes)
+{'IMG_6188.MOV': ('interrupted', 'transcribing', 'Clipco quit while this job was running. Resume to run it again.'), 'IMG_6189.MOV': ('queued', None, None)} running= False
+== relaunch: reconcile
+{'IMG_6188.MOV': ('interrupted', 'transcribing', 'Clipco quit while this job was running. Resume to run it again.'), 'IMG_6189.MOV': ('interrupted', None, 'Clipco stopped before this job started. Resume to run it.')} running= False
+== nothing runs without resume:
+{"event": "result", "already_running": false, "jobs": [{"id": "job_23bfd07d726a4a6e", "operation": "import", "clip_id": 
+{'IMG_6188.MOV': ('interrupted', 'transcribing', 'Clipco quit while this job was running. Resume to run it again.'), 'IMG_6189.MOV': ('interrupted', None, 'Clipco stopped before this job started. Resume to run it.')} running= False
+== resume + run
+04:33:13
+04:34:31
+{'IMG_6188.MOV': ('completed', 'ready', None), 'IMG_6189.MOV': ('completed', 'ready', None)} running= False
+5

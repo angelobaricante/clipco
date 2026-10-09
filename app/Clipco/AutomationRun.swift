@@ -17,6 +17,74 @@ final class ProbeState {
 ///     [-ClipcoAutomationSearch "query"]   (the import path may also be a folder)
 @MainActor
 enum AutomationRun {
+    /// UI regression verification through real worker entry points, restricted to a disposable index.
+    static func polish(_ model: AppModel, out: URL) async {
+        guard let home = ProcessInfo.processInfo.environment["CLIPCO_HOME"],
+              home.hasPrefix("/private/tmp/") else { return }
+        var checks: [String: Bool] = [:]
+        do {
+            guard let project = model.projects.last else { throw WorkerError.noResult }
+            try await model.open(project)
+            model.filter = .all
+            guard let clip = model.clips.first(where: { !$0.segments.isEmpty && !$0.excluded }),
+                  let segment = clip.segments.first else { throw WorkerError.noResult }
+
+            // Filters must follow corrected Segment roles, not the legacy whole-clip classification.
+            await model.setRole("needs_review", for: segment)
+            model.filter = .needsReview
+            checks["unresolved_role_is_reviewable"] = model.visibleClips.contains { $0.id == clip.id }
+            await model.setRole("b-roll", for: segment)
+            model.filter = .bRoll
+            checks["corrected_segment_in_broll_filter"] = model.visibleClips.contains { $0.id == clip.id }
+            model.select(clip.id)
+            model.filter = .excluded
+            checks["hidden_selection_cleared"] = model.selectedClip == nil && model.commandTargets.isEmpty
+            model.filter = .all
+
+            // Note destination must remain the membership captured before navigation.
+            let other = try await model.worker.createProject(name: "UI verification destination", context: "")
+            try await model.worker.addToProject(projectID: other.id, clipIDs: [clip.id])
+            model.projects.append(other)
+            try await model.open(other)
+            let saved = await model.saveNote("UI verification: captured Project", for: clip.id, projectID: project.id)
+            let old = try await model.worker.snapshot(projectID: project.id)
+            let new = try await model.worker.snapshot(projectID: other.id)
+            checks["note_saved_to_captured_project"] = saved
+                && old.clips.first(where: { $0.id == clip.id })?.note?.text == "UI verification: captured Project"
+                && new.clips.first(where: { $0.id == clip.id })?.note == nil
+
+            // Pagination and nonzero playback use the same actions exposed in the browser.
+            await model.openLibrary()
+            model.searchText = "camera"
+            await model.search()
+            let firstIDs = Set(model.searchResults?.results.map(\.id) ?? [])
+            if model.searchResults?.nextOffset != nil {
+                await model.search(loadMore: true)
+                let all = model.searchResults?.results ?? []
+                checks["search_continuation_no_duplicates"] = all.count > firstIDs.count
+                    && Set(all.map(\.id)).count == all.count
+            }
+            guard let hit = model.searchResults?.results.first(where: { $0.start > 0 }) else {
+                throw WorkerError.noResult
+            }
+            model.selectedHit = hit.id
+            model.select(hit.clipId)
+            checks["search_play_action_available"] = model.playSelectedClip()
+            try? await Task.sleep(for: .seconds(1))
+            model.player.pause()
+            let position = model.player.currentTime ?? -1
+            checks["playback_starts_at_matching_segment"] = position >= hit.start && position < hit.start + 3
+            model.closePlayer()
+            model.searchText = ""
+            checks["clear_search_resets_loading"] = !model.isSearching && model.searchResults == nil
+            checks["no_errors"] = model.errorMessage == nil
+            write(["checks": checks, "passed": !checks.isEmpty && checks.values.allSatisfy { $0 },
+                   "playback_start": hit.start, "observed_position": position], to: out)
+        } catch {
+            write(["checks": checks, "passed": false, "error": error.localizedDescription], to: out)
+        }
+        NSApp.terminate(nil)
+    }
     /// Review workflow on a real Project: selection across inspector/view changes, filters, verified playback
     /// access, then (optionally) a note and exclusion through the same model calls the inspector uses.
     ///
@@ -210,8 +278,141 @@ enum AutomationRun {
         try? data?.write(to: out.appending(path: "report.json"))
     }
 
+    /// The recoverable queue in the real app, through the same model calls as a Finder drop, New Project's Create,
+    /// and the Activity popover's Pause/Resume/Cancel controls. Run it against a scratch CLIPCO_HOME:
+    ///
+    ///   CLIPCO_HOME=/tmp/home Clipco -ClipcoAutomationQueue "/a/folder|/b/clip.mov|/c/library-clip.mp4"
+    ///     -ClipcoAutomationOut /tmp/out [-ClipcoAutomationHold 6]
+    ///
+    /// All but the last path are dropped on the empty workspace; the last is dropped on the Reusable B-roll view.
+    static func queue(_ model: AppModel, sources: [URL], out: URL, defaults: UserDefaults) async {
+        let started = Date()
+        let hold = defaults.double(forKey: "ClipcoAutomationHold")
+        var report: [String: Any] = ["readiness_at_launch": model.readiness?.state.rawValue ?? NSNull()]
+        var steps: [[String: Any]] = []
+        func note(_ step: String) {
+            let names = Dictionary(uniqueKeysWithValues: model.projects.map { ($0.id, $0.name) })
+            steps.append([
+                "step": step, "t": (Date().timeIntervalSince(started) * 10).rounded() / 10,
+                "open": model.showingLibrary ? "Footage library" : model.project?.name ?? "nothing",
+                "paused": model.queue?.paused ?? false, "activity": model.activity?.stage ?? NSNull(),
+                "jobs": (model.queue?.jobs ?? []).map {
+                    "\($0.originalFilename): \($0.state.rawValue) → \($0.projectId.flatMap { names[$0] } ?? "library")"
+                },
+                "browser": model.clips.map { "\($0.originalFilename) \($0.status.rawValue)" },
+            ])
+        }
+        var slowestRefresh = 0.0
+        func until(_ seconds: Double, _ condition: () -> Bool) async {
+            let deadline = Date().addingTimeInterval(seconds)
+            while !condition() && Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(500))
+                let asked = Date()
+                await model.refreshQueue()
+                slowestRefresh = max(slowestRefresh, Date().timeIntervalSince(asked))
+            }
+        }
+        let state = ProbeState()
+        let probe = Task { @MainActor in
+            while state.probing {
+                let t = Date()
+                try? await Task.sleep(for: .milliseconds(50))
+                state.worstStall = max(state.worstStall, Date().timeIntervalSince(t) - 0.05)
+            }
+        }
+        note("launch")
+        // 1. Drop on the empty workspace: New Project opens with a suggested name; Create queues the footage.
+        model.drop(Array(sources.dropLast()))
+        report["empty_workspace_drop_opens_new_project"] = model.showNewProject
+        let footage = model.newProjectFootage
+        let suggested = AppModel.suggestedName(for: footage)
+        report["suggested_name"] = suggested
+        if hold > 0 { try? await Task.sleep(for: .seconds(hold)) }  // the sheet, for a window capture
+        model.showNewProject = false
+        guard let created = await model.createProject(name: suggested, context: "") else {
+            report["error"] = model.errorMessage
+            write(report, to: out)
+            NSApp.terminate(nil)
+            return
+        }
+        await model.enqueue(footage, into: created.id)
+        report["notice_after_drop"] = model.importNotice ?? NSNull()
+        note("dropped on empty workspace")
+        // 2. Open another Project while the first one's work is queued: its jobs keep their destination.
+        await model.createProject(name: "Navigation check", context: "")
+        note("opened another Project")
+        // 3. Drop on the Reusable B-roll view: it goes to the library alone.
+        // The sidebar's selection binding can reopen the Project right after a programmatic switch; wait until the
+        // library view holds, as it does after a click.
+        for _ in 0..<10 {
+            await model.openLibrary()
+            try? await Task.sleep(for: .seconds(1))
+            if model.showingLibrary { break }
+        }
+        report["library_open_when_dropped"] = model.showingLibrary
+        model.drop([sources.last!])
+        await until(10) { model.queue?.jobs.contains { $0.originalFilename == sources.last!.lastPathComponent } == true }
+        note("dropped on the library")
+        // 4. Pause once a clip is analysing: it finishes, nothing new starts.
+        await until(120) { model.queue?.active != nil }
+        await model.pauseQueue()
+        note("paused while a clip was active")
+        await until(600) { model.queue?.active == nil && model.queue?.running == false }
+        note("paused: the active clip finished, the runner stopped")
+        // 5. Cancel queued work: removed, footage kept.
+        if let queued = model.queue?.jobs.last(where: { $0.state == .queued }) {
+            await model.cancel([queued])
+            note("cancelled a queued job")
+        }
+        // 6. Resume and keep browsing and searching while the rest is analysed.
+        let resumed = Date()
+        await model.resumeQueue()
+        report["resume_call_seconds"] = Date().timeIntervalSince(resumed)
+        await until(30) { model.queue?.active != nil }
+        note("resumed: the next clip started")
+        if let project = model.projects.first(where: { $0.id == created.id }) { try? await model.open(project) }
+        model.browserMode = .list
+        model.searchText = "person"
+        let asked = Date()
+        await model.search()
+        report["search_while_analysing"] = ["seconds": Date().timeIntervalSince(asked),
+                                            "analysing": model.queue?.active?.originalFilename ?? NSNull(),
+                                            "results": model.searchResults?.results.count ?? 0]
+        model.searchText = ""
+        model.browserMode = .grid
+        note("browsed and searched while analysing")
+        await until(900) { (model.queue?.unfinished ?? 0) == 0 && model.queue?.running == false }
+        try? await model.reload()
+        note("queue finished")
+        state.probing = false
+        _ = await probe.value
+        report["worst_main_thread_stall_ms"] = (state.worstStall * 1000).rounded()
+        report["slowest_queue_refresh_seconds"] = slowestRefresh
+        report["steps"] = steps
+        report["error"] = model.errorMessage ?? NSNull()
+        model.showActivity = true
+        if let window = NSApp.windows.first(where: \.isVisible) {
+            report["window_number"] = window.windowNumber
+            report["window_frame"] = NSStringFromRect(window.frame)
+        }
+        write(report, to: out)
+        if hold > 0 { try? await Task.sleep(for: .seconds(hold * 2)) }  // the Activity popover, for a window capture
+        NSApp.terminate(nil)
+    }
+
     static func runIfRequested(_ model: AppModel) async {
         let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "ClipcoAutomationPolish"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
+            await polish(model, out: URL(filePath: out))
+            return
+        }
+        if let list = defaults.string(forKey: "ClipcoAutomationQueue"),
+           let out = defaults.string(forKey: "ClipcoAutomationOut") {
+            let sources = list.split(separator: "|").map { URL(filePath: String($0)) }
+            await queue(model, sources: sources, out: URL(filePath: out), defaults: defaults)
+            return
+        }
         if let name = defaults.string(forKey: "ClipcoAutomationReview"),
            let out = defaults.string(forKey: "ClipcoAutomationOut") {
             await review(model, clipNamed: name, out: URL(filePath: out), defaults: defaults)

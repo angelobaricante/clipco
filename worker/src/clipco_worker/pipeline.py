@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import time
@@ -138,6 +139,36 @@ def frame_times(start: float, end: float, per_segment: int) -> list[float]:
     return [round(start + span * (i + 1) / (n + 1), 3) for i in range(n)]
 
 
+def discover(paths: list[Path]) -> tuple[list[Path], list[dict]]:
+    """Every video among chosen files and inside chosen folders (and their subfolders, skipping hidden ones), and
+    what was left out: {"path", "reason": "unsupported" | "inaccessible"}. Clips are identified by their resolved
+    original path, as import_clip does, so a linked, overlapping or twice-chosen file is one clip."""
+    found: set[Path] = set()
+    skipped: dict[Path, str] = {}
+    for path in (Path(p).expanduser().resolve() for p in paths):
+        if path.is_dir():
+            try:
+                found |= {p for p in path.rglob("*")
+                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
+            except OSError:
+                skipped[path] = "inaccessible"
+        elif path.is_file():
+            found.add(path)
+        else:
+            skipped[path] = "inaccessible"
+    sources = set()
+    for p in found:
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in VIDEO_SUFFIXES:
+            skipped[p] = "unsupported"
+        elif not os.access(p, os.R_OK):
+            skipped[p] = "inaccessible"
+        else:
+            sources.add(p.resolve())
+    return sorted(sources), [{"path": str(p), "reason": r} for p, r in sorted(skipped.items())]
+
+
 class Worker:
     def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = True):
         self.home = Path(home)
@@ -145,7 +176,9 @@ class Worker:
         self.speech = speech
         self.vision = vision
         self.recipe = recipe or RECIPE
-        self.tone_on_import = tone_on_import  # a new analysis also reads its Segments' emotional tone
+        # A new analysis (import or re-analysis) also reads its Segments' emotional tone. Footage analysed before
+        # tone existed is upgraded only when the creator asks (enrich_tone).
+        self.tone_on_import = tone_on_import
 
     def create_project(self, name: str, context: str = "") -> dict:
         return self.store.create_project(new_id("prj"), name.strip(), context.strip())
@@ -354,26 +387,25 @@ class Worker:
         pending = [s for s in self.store.review_clip(clip_id)["segments"] if s["tone"]["analyzed_at"] is None]
         for i, seg in enumerate(pending):
             report("reading_tone", {"clip_id": clip_id, "segment": i + 1, "of": len(pending)})
-            frames = [o["frame"] for o in seg["observations"]]
-            local = {f"t{n + 1}": t["id"] for n, t in enumerate(seg["transcript"])}
-            local |= {f"f{n + 1}": f["id"] for n, f in enumerate(frames)}
+            # The model sees short local IDs; code maps its citations back to the saved evidence IDs.
+            lines = {f"t{n + 1}": t for n, t in enumerate(seg["transcript"])}
+            seen = {f"f{n + 1}": o for n, o in enumerate(seg["observations"])}
             request = tone.ToneRequest(
                 original_filename=clip["original_filename"], start=seg["start"], end=seg["end"],
-                transcript=[TranscriptItem(f"t{n + 1}", t["start"], t["end"], t["text"])
-                            for n, t in enumerate(seg["transcript"])],
-                frames=[FrameItem(f"f{n + 1}", f["time"], Path(f["path"])) for n, f in enumerate(frames)],
-                observations={f"f{n + 1}": o["text"] for n, o in enumerate(seg["observations"])})
+                transcript=[TranscriptItem(k, t["start"], t["end"], t["text"]) for k, t in lines.items()],
+                frames=[FrameItem(k, o["frame"]["time"], Path(o["frame"]["path"])) for k, o in seen.items()],
+                observations={k: o["text"] for k, o in seen.items()})
             for f in request.frames:
                 if not f.path.is_file():
                     raise InferenceError(f"sampled frame {f.path.name} is no longer in Clipco's cache; "
                                          "re-analyse the clip to read its tone")
-            reading = self._read_tone(request, set(local))
-            reading.tones = [{**t, "evidence_ids": [local[r] for r in t["evidence_ids"]]} for t in reading.tones]
-            reading.connotations = [{**c, "evidence_ids": [local[r] for r in c["evidence_ids"]]}
-                                    for c in reading.connotations]
+            local = {k: t["id"] for k, t in lines.items()} | {k: o["frame"]["id"] for k, o in seen.items()}
+            reading = self._validated_tone(request, set(local))
+            for item in reading.tones + reading.connotations:
+                item["evidence_ids"] = [local[r] for r in item["evidence_ids"]]
             self.store.save_tone(seg["id"], reading, tone.TONE_RECIPE, self.vision.identity)
 
-    def _read_tone(self, request: tone.ToneRequest, known: set[str], attempts: int = 2) -> tone.ToneReading:
+    def _validated_tone(self, request: tone.ToneRequest, known: set[str], attempts: int = 2) -> tone.ToneReading:
         for attempt in range(attempts):
             try:
                 return tone.validate(self.vision.describe_tone(request), known)
@@ -482,16 +514,7 @@ class Worker:
         report = progress or (lambda stage, detail: None)
         if project_id is not None and self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
-        found: set[Path] = set()
-        for path in (Path(p).expanduser().resolve() for p in paths):
-            if path.is_dir():
-                found |= {p for p in path.rglob("*")
-                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
-            else:
-                found.add(path)
-        # Clips are identified by their resolved original path, as import_clip does, so a linked or twice-chosen
-        # file is one clip.
-        sources = sorted({p.resolve() for p in found if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES})
+        sources, _ = discover(paths)
         if not sources:
             raise ValueError("no video files in the chosen items")
         registered = []

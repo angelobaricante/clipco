@@ -66,6 +66,8 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     var roleSummary: RoleSummary
     /// Creator role choices for Segment ranges that a later re-analysis no longer has.
     var unmatchedRoleCorrections: [UnmatchedRoleCorrection]
+    /// Creator tones for Segment ranges that a later re-analysis no longer has.
+    var unmatchedToneCorrections: [UnmatchedToneCorrection]
 
     var displayLabel: String { label ?? originalFilename }
 
@@ -73,7 +75,18 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
 
     /// Not yet usable context, or suggested corrections/takes the creator may want to choose between.
     var needsReview: Bool {
-        status != .ready || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+        status != .ready || segments.contains { ["mixed", "needs_review"].contains($0.role.effective) }
+            || !unmatchedRoleCorrections.isEmpty || !unmatchedToneCorrections.isEmpty
+            || relationships.contains { $0.kind == "spoken_correction" || $0.kind == "repeated_take" }
+    }
+
+    func containsRole(_ role: String) -> Bool { segments.contains { $0.role.effective == role } }
+
+    var roleLabel: String {
+        let roles = Set(segments.map(\.role.effective))
+        if roles.isEmpty { return "Not analyzed" }
+        if roles.count == 1, let role = roles.first { return SegmentRole.name(role) }
+        return "Mixed"
     }
 
     /// Whisper's language code as a readable name, e.g. "tl" → "Tagalog".
@@ -93,6 +106,12 @@ struct UnmatchedRoleCorrection: Decodable, Hashable, Sendable {
     var start: Double
     var end: Double
     var role: String
+}
+
+struct UnmatchedToneCorrection: Decodable, Hashable, Sendable {
+    var start: Double
+    var end: Double
+    var tones: [String]
 }
 
 struct RoleSummary: Decodable, Hashable, Sendable {
@@ -208,11 +227,41 @@ struct SegmentTone: Decodable, Hashable, Sendable {
     static let vocabulary = ["calm", "hopeful", "joyful", "playful", "warm", "nostalgic", "melancholic", "tense",
                              "energetic", "awe", "satisfying", "curious"]
 
-    var summary: String {
+    var summary: String { Self.summary(state: state, tones: tones) }
+
+    static func summary(state: String, tones: [String]) -> String {
         switch state {
         case "not_analyzed": "Not analyzed"
         case "none_supported": "No supported tone"
         default: tones.isEmpty ? "None (set by you)" : tones.map(\.capitalized).joined(separator: ", ")
+        }
+    }
+}
+
+enum EditingAgent: String, Identifiable {
+    case codex = "Codex", claude = "Claude"
+    var id: Self { self }
+}
+
+struct AgentRegistration: Decodable, Equatable, Sendable, Identifiable {
+    var id: String
+    var name: String
+    var installed: Bool
+    var configured: Bool
+    var state: String
+    var error: String?
+    var configPath: String?
+    var setupCommand: String?
+    var setupJson: String?
+    var guidance: String
+
+    var title: String {
+        switch state {
+        case "configured": "Configured"
+        case "not_installed": "Not installed"
+        case "conflict": "Needs attention"
+        case "error": "Couldn’t check setup"
+        default: "Not configured"
         }
     }
 }
@@ -239,6 +288,7 @@ struct McpStatus: Decodable, Equatable, Sendable {
     var connectMs: Int?
     var overviewMs: Int?
     var codex: Codex
+    var agents: [AgentRegistration]?
 
     /// Codex has a `clipco` server, but it launches something other than this installation.
     var codexRegistrationDiffers: Bool { codex.registered && codex.registeredCommand != serverCommand }
@@ -250,6 +300,7 @@ struct SearchPage: Decodable, Sendable {
     var totalMatches: Int
     var truncated: Bool
     var results: [SearchHit]
+    var nextOffset: Int?
 }
 
 struct SearchHit: Decodable, Identifiable, Hashable, Sendable {
@@ -350,6 +401,71 @@ struct WorkerEvent: Decodable, Sendable {
     var elapsed: Double?
     var kind: String?
     var message: String?
+    var detail: String?
+    var jobId: String?
+    // Queue results
+    var jobs: [AnalysisJob]?
+    var counts: [String: Int]?
+    var paused: Bool?
+    var running: Bool?
+    var alreadyRunning: Bool?
+    var alreadyQueued: [AnalysisJob]?
+    var skipped: [SkippedItem]?
+
+    /// The queue as a result reported it (every queue command returns it).
+    var queue: QueueState? {
+        guard let jobs else { return nil }
+        return QueueState(jobs: jobs, paused: paused ?? false, running: running ?? false)
+    }
+}
+
+/// Queued work to prepare or enrich one Source clip, bound to its destination when it was requested.
+struct AnalysisJob: Decodable, Identifiable, Hashable, Sendable {
+    enum State: String, Decodable, Sendable {
+        case queued, active, waiting, completed, failed, cancelled, interrupted
+    }
+
+    var id: String
+    var operation: String
+    var clipId: String
+    var projectId: String?
+    var sourcePath: String
+    var originalFilename: String
+    var state: State
+    var stage: String?
+    var error: String?
+    var attempts: Int
+    var cancelRequested: Bool
+
+    var operationTitle: String {
+        switch operation {
+        case "import": "Analyze"
+        case "reanalyse": "Re-analyse"
+        case "enrich_tone": "Read emotional tone"
+        default: operation
+        }
+    }
+
+    var canCancel: Bool { [.queued, .active, .waiting, .interrupted].contains(state) && !cancelRequested }
+    var canRetry: Bool { [.failed, .cancelled, .interrupted].contains(state) }
+}
+
+struct QueueState: Equatable, Sendable {
+    var jobs: [AnalysisJob]
+    var paused: Bool
+    var running: Bool
+
+    func count(_ state: AnalysisJob.State) -> Int { jobs.filter { $0.state == state }.count }
+    var active: AnalysisJob? { jobs.first { $0.state == .active } }
+    /// Work that has not finished: it runs, waits, or awaits the creator's resume.
+    var unfinished: Int { jobs.filter { [.queued, .active, .waiting, .interrupted].contains($0.state) }.count }
+    var finished: Int { jobs.filter { [.completed, .cancelled].contains($0.state) }.count }
+}
+
+/// A dropped or chosen item that was not registered, and why.
+struct SkippedItem: Decodable, Hashable, Sendable {
+    var path: String
+    var reason: String
 }
 
 extension Double {

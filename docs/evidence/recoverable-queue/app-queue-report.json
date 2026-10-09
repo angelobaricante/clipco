@@ -1,0 +1,193 @@
+{
+  "empty_workspace_drop_opens_new_project" : true,
+  "error" : null,
+  "library_open_when_dropped" : true,
+  "notice_after_drop" : "3 clips queued · 1 skipped (unsupported): notes.txt",
+  "readiness_at_launch" : "ready",
+  "resume_call_seconds" : 0.10441398620605469,
+  "search_while_analysing" : {
+    "analysing" : "IMG_6188.MOV",
+    "results" : 1,
+    "seconds" : 0.051926016807556152
+  },
+  "slowest_queue_refresh_seconds" : 0.31645894050598145,
+  "steps" : [
+    {
+      "activity" : null,
+      "browser" : [
+
+      ],
+      "jobs" : [
+
+      ],
+      "open" : "nothing",
+      "paused" : false,
+      "step" : "launch",
+      "t" : 0
+    },
+    {
+      "activity" : null,
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 pending",
+        "IMG_6188.MOV pending",
+        "IMG_6189.MOV pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: queued → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop"
+      ],
+      "open" : "drop",
+      "paused" : false,
+      "step" : "dropped on empty workspace",
+      "t" : 6.7000000000000002
+    },
+    {
+      "activity" : "Checking source",
+      "browser" : [
+
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: active → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop"
+      ],
+      "open" : "Navigation check",
+      "paused" : false,
+      "step" : "opened another Project",
+      "t" : 6.9000000000000004
+    },
+    {
+      "activity" : "Checking source",
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 indexing",
+        "IMG_6188.MOV pending",
+        "IMG_6189.MOV pending",
+        "library-pattern.mp4 pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: active → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: queued → library"
+      ],
+      "open" : "Footage library",
+      "paused" : false,
+      "step" : "dropped on the library",
+      "t" : 8.5999999999999996
+    },
+    {
+      "activity" : "Checking source",
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 indexing",
+        "IMG_6188.MOV pending",
+        "IMG_6189.MOV pending",
+        "library-pattern.mp4 pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: active → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: queued → library"
+      ],
+      "open" : "Footage library",
+      "paused" : true,
+      "step" : "paused while a clip was active",
+      "t" : 8.5999999999999996
+    },
+    {
+      "activity" : null,
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 ready",
+        "IMG_6188.MOV pending",
+        "IMG_6189.MOV pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: completed → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: queued → library"
+      ],
+      "open" : "drop",
+      "paused" : true,
+      "step" : "paused: the active clip finished, the runner stopped",
+      "t" : 33.200000000000003
+    },
+    {
+      "activity" : null,
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 ready",
+        "IMG_6188.MOV pending",
+        "IMG_6189.MOV pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: completed → drop",
+        "IMG_6188.MOV: queued → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: cancelled → library"
+      ],
+      "open" : "drop",
+      "paused" : true,
+      "step" : "cancelled a queued job",
+      "t" : 33.299999999999997
+    },
+    {
+      "activity" : "Checking source",
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 ready",
+        "IMG_6188.MOV indexing",
+        "IMG_6189.MOV pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: completed → drop",
+        "IMG_6188.MOV: active → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: cancelled → library"
+      ],
+      "open" : "drop",
+      "paused" : false,
+      "step" : "resumed: the next clip started",
+      "t" : 34
+    },
+    {
+      "activity" : "Checking source",
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 ready",
+        "IMG_6188.MOV indexing",
+        "IMG_6189.MOV pending"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: completed → drop",
+        "IMG_6188.MOV: active → drop",
+        "IMG_6189.MOV: queued → drop",
+        "library-pattern.mp4: cancelled → library"
+      ],
+      "open" : "drop",
+      "paused" : false,
+      "step" : "browsed and searched while analysing",
+      "t" : 34
+    },
+    {
+      "activity" : null,
+      "browser" : [
+        "DJI_20261001124917_0006_D.MP4 ready",
+        "IMG_6188.MOV ready",
+        "IMG_6189.MOV ready"
+      ],
+      "jobs" : [
+        "DJI_20261001124917_0006_D.MP4: completed → drop",
+        "IMG_6188.MOV: completed → drop",
+        "IMG_6189.MOV: completed → drop",
+        "library-pattern.mp4: cancelled → library"
+      ],
+      "open" : "drop",
+      "paused" : false,
+      "step" : "queue finished",
+      "t" : 120.2
+    }
+  ],
+  "suggested_name" : "drop",
+  "window_frame" : "{{52, 77}, {1390, 809}}",
+  "window_number" : 52748,
+  "worst_main_thread_stall_ms" : 290
+}

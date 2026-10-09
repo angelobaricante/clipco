@@ -93,6 +93,16 @@ CREATE TABLE IF NOT EXISTS relationships (
 CREATE TABLE IF NOT EXISTS clip_aliases (
   id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES source_clips(id), project_id TEXT NOT NULL
 );
+-- Analysis jobs: queued work bound to its source and destination when requested. Its lifecycle is separate from
+-- the source's analysis status; clip_id is not a foreign key, so a job outlives a source removed from the library.
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, operation TEXT NOT NULL, clip_id TEXT NOT NULL, project_id TEXT,
+  source_path TEXT NOT NULL, original_filename TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('queued','active','waiting','completed','failed','cancelled','interrupted')),
+  stage TEXT, progress TEXT, error TEXT, outcome TEXT, cancel_requested INTEGER NOT NULL DEFAULT 0, owner TEXT,
+  prior_status TEXT, prior_error TEXT, prior_revision INTEGER, attempts INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL, started_at REAL, finished_at REAL, updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS segment_aliases (
   id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES source_clips(id), project_id TEXT NOT NULL,
   original_filename TEXT NOT NULL
@@ -108,7 +118,7 @@ class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.home = path.parent
-        self.db = sqlite3.connect(path, isolation_level=None)
+        self.db = sqlite3.connect(path, isolation_level=None, timeout=30)  # the queue runner writes too
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         legacy = self._columns("source_clips")
@@ -475,6 +485,13 @@ class Store:
                 for table in ("memberships", "clip_aliases", "segment_aliases"):
                     db.execute(f"DELETE FROM {table} WHERE clip_id=?", (clip_id,))
                 db.execute("DELETE FROM source_clips WHERE id=?", (clip_id,))
+                # Its unstarted work is removed; an active job is asked to stop (and could not publish anyway).
+                now = time.time()
+                db.execute("UPDATE jobs SET state='cancelled', error='The source was removed from the library.',"
+                           " finished_at=?, updated_at=? WHERE clip_id=? AND state IN ('queued','waiting','interrupted')",
+                           (now, now, clip_id))
+                db.execute("UPDATE jobs SET cancel_requested=1, updated_at=? WHERE clip_id=? AND state='active'",
+                           (now, clip_id))
             for project_id in projects:
                 self._relate(project_id)
             return sorted(projects)
@@ -554,6 +571,10 @@ class Store:
         clip["unmatched_role_corrections"] = [
             {"start": r["start"], "end": r["end_"], "role": r["role"], "updated_at": r["updated_at"]}
             for r in db.execute("SELECT * FROM segment_roles WHERE clip_id=? ORDER BY start", (clip["id"],))
+            if (r["start"], r["end_"]) not in ranges]
+        clip["unmatched_tone_corrections"] = [
+            {"start": r["start"], "end": r["end_"], "tones": json.loads(r["tones"]), "updated_at": r["updated_at"]}
+            for r in db.execute("SELECT * FROM tone_corrections WHERE clip_id=? ORDER BY start", (clip["id"],))
             if (r["start"], r["end_"]) not in ranges]
         return clip
 

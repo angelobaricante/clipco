@@ -9,6 +9,9 @@ struct ClipcoApp: App {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    model.stopRunner()
+                }
                 .task {
                     await model.start()
                     #if DEBUG
@@ -18,13 +21,19 @@ struct ClipcoApp: App {
         }
         .commands {
             @Bindable var model = model
-            CommandGroup(after: .newItem) {
+            CommandGroup(replacing: .newItem) {
+                Button("New Project…") { model.showNewProject = true }
+                    .keyboardShortcut("n", modifiers: .command)
                 Button("Import Footage…") { model.showImport = true }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
             }
             CommandGroup(after: .textEditing) {
                 Button("Find in Footage Context") { model.searchFocusRequest += 1 }
                     .keyboardShortcut("f", modifiers: .command)
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Clipco Setup…") { model.showSetup = true }
+                    .keyboardShortcut(",", modifiers: .command)
             }
             CommandGroup(after: .sidebar) {
                 Picker("View", selection: $model.browserMode) {
@@ -35,6 +44,8 @@ struct ClipcoApp: App {
                 Divider()
                 Button(model.showInspector ? "Hide Inspector" : "Show Inspector") { model.showInspector.toggle() }
                     .keyboardShortcut("i", modifiers: .command)
+                Button("Show Analysis Queue") { model.showActivity = true }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
             }
             CommandMenu("Clip") {
                 let targets = model.commandTargets
@@ -49,13 +60,13 @@ struct ClipcoApp: App {
                     Task { await model.setExcluded(targets, !allExcluded) }
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(targets.isEmpty)
+                .disabled(targets.isEmpty || model.showingLibrary)
                 Divider()
                 Button("Re-analyse") { Task { await model.retry(targets) } }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(!model.canRetry(targets))
                 Button("Check Original Files") { Task { await model.checkSources() } }
-                    .disabled(model.project == nil || model.activity != nil || model.isCheckingSources)
+                    .disabled(!model.hasScope || model.activity != nil || model.isCheckingSources)
             }
         }
     }

@@ -13,3 +13,7 @@ Validated on October 10, 2026 (Asia/Manila).
 Native screen inspection remains incomplete: the computer-use service failed with ScreenCaptureKit error -3811. A direct app launch inside the execution sandbox also aborted before producing a window. Build and compiled-resource checks do not prove actual light/dark sheet layout or Dock rendering. The creator can inspect those after rebuilding/relaunching the app. No runtime inference or worker behavior was changed by branding, and no new inference/performance claims were made.
 
 No footage, model weights, or local indexes were included in the brand kit or uploaded to Canva. No website/social content or hackathon submission was published. The historical 10:00 Asia/Manila deadline interpretation left more than five hours at the final checks; the organizer cutoff was not independently re-verified, and the submission buffer remains reserved.
+
+## PR readiness follow-up
+
+At the creator's request, PR #24 was marked ready for review. Latest main (`03d0b9f`) was merged into the branding branch. The sole conflict was the generated Xcode project resource phase; XcodeGen regenerated it with both Clipco and agent artwork catalogs. The Debug build passed again, and native bundle lookup verified `ClipcoLogo`, `ClipcoMark`, `CodexAgent`, and `ClaudeAgent` together. Native screen inspection remains incomplete as described above.
