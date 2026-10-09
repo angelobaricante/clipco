@@ -74,3 +74,17 @@ def extract_frame(path: Path, time: float, out: Path, width: int = 512) -> Path:
     if not out.exists():
         raise MediaError(f"no frame decoded at {time:.3f}s")
     return out
+
+
+def silences(wav: Path, min_seconds: float, noise_db: float) -> list[tuple[float, float]]:
+    """Measured stretches of at least min_seconds quieter than noise_db, as (start, end) seconds."""
+    out = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(wav), "-af",
+                f"silencedetect=noise={noise_db}dB:d={min_seconds}", "-f", "null", "-"])
+    found, start = [], None
+    for line in out.stderr.splitlines():
+        if "silence_start:" in line:
+            start = float(line.split("silence_start:")[1].split()[0])
+        elif "silence_end:" in line and start is not None:
+            found.append((max(0.0, start), float(line.split("silence_end:")[1].split()[0])))
+            start = None
+    return found

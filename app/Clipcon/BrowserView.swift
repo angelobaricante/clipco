@@ -58,6 +58,11 @@ struct ClipActions: View {
             model.clipsToRemove = targets
         }
         .disabled(!model.canDelete)
+        Button(targets.count == 1 ? "Remove from Library…" : "Remove \(targets.count) Clips from Library…",
+               systemImage: "trash.slash", role: .destructive) {
+            model.clipsToRemoveFromLibrary = targets
+        }
+        .disabled(!model.canDelete)
     }
 }
 

@@ -51,9 +51,29 @@ enum AutomationRun {
             let target = model.clips.filter { $0.id == clip.id }
             await model.setExcluded(target, defaults.bool(forKey: "ClipconAutomationExclude"))
         }
+        // `-ClipconAutomationReuse YES|NO` and `-ClipconAutomationRole <segment index>:<role|suggested>` go through
+        // the same model calls as the inspector's reuse switch and Segment role menus.
+        if defaults.object(forKey: "ClipconAutomationReuse") != nil {
+            await model.setReuse(clip, defaults.bool(forKey: "ClipconAutomationReuse"))
+        }
+        if let change = defaults.string(forKey: "ClipconAutomationRole"), let colon = change.firstIndex(of: ":"),
+           let index = Int(change[..<colon]), let current = model.clips.first(where: { $0.id == clip.id }),
+           current.segments.indices.contains(index) {
+            let role = String(change[change.index(after: colon)...])
+            await model.setRole(role == "suggested" ? nil : role, for: current.segments[index])
+        }
         let after = model.clips.first { $0.id == clip.id }
         report["after"] = ["note": after?.note?.text ?? NSNull(), "excluded": after?.excluded ?? NSNull(),
                            "selected": model.selection == [clip.id]]
+        var library: [String: Any] = ["reuse_allowed": after?.reuseAllowed ?? NSNull(),
+                                       "role_summary": after?.roleSummary.text ?? NSNull()]
+        library["projects"] = (after?.projects ?? []).map(\.name)
+        library["segment_roles"] = (after?.segments ?? []).map { (segment: Segment) -> String in
+            let range = "\(segment.start.timecode)–\(segment.end.timecode)"
+            return "\(range) \(segment.role.effective) (suggested \(segment.role.suggested), "
+                + "creator \(segment.role.creator ?? "none"))"
+        }
+        report["library"] = library
         report["counts"] = Dictionary(uniqueKeysWithValues: FootageFilter.allCases.map { ($0.rawValue, model.count($0)) })
         if let query = defaults.string(forKey: "ClipconAutomationSearch") {
             model.searchText = query

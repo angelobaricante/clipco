@@ -9,22 +9,31 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from . import media
+from . import media, roles
 from .retrieval import Index, live_status
 from .speech import TranscriptSpan
-from .store import Store
+from .store import SourceRemoved, Store
 from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailable, TranscriptItem, validate
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
-    "version": 6,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role;
-    #                6: describe what is shown/said only (no Project description; no "speaking" without speech)
+    "version": 7,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role;
+    #                6: describe what is shown/said only (no Project description; no "speaking" without speech);
+    #                7: long silences become their own Segments, so cutaways get their own role; transcript lines
+    #                   are bounded by measured silences (whisper.cpp with VAD can stretch a line across one)
     "segment_target_seconds": 30.0,
     "silent_segment_seconds": 10.0,
+    "silent_gap_seconds": 10.0,
+    "silence_noise_db": -45.0,
     "frames_per_segment": 2,
     "max_frames": 24,
     "frame_width": 512,
 }
+
+# Earlier recipes whose saved context stays valid under the current one: they differ only in finding Segment
+# boundaries for roles, so their clips are not stale; re-analysing them (explicitly) adds per-Segment roles.
+COMPATIBLE_RECIPE_VERSIONS = {6}
+ROLE_ONLY_KEYS = ("version", "silent_gap_seconds", "silence_noise_db")
 
 Progress = Callable[[str, dict], None]
 
@@ -79,11 +88,18 @@ def collapse_repetition_loops(spans: list[TranscriptSpan]) -> list[TranscriptSpa
     return kept
 
 
-def clean_spans(spans: list[TranscriptSpan], duration: float) -> list[TranscriptSpan]:
-    """Keep only actual speech with valid source-relative bounds; clamp alignment overrun at the end."""
+def clean_spans(spans: list[TranscriptSpan], duration: float,
+                silences: list[tuple[float, float]] = ()) -> list[TranscriptSpan]:
+    """Keep only actual speech with valid source-relative bounds; clamp alignment overrun at the end, and a line
+    that claims to run through a measured long silence to its side of that silence."""
     kept = []
     for s in sorted(spans, key=lambda s: s.start):
         start, end = max(0.0, s.start), min(s.end, duration)
+        for quiet_start, quiet_end in silences:
+            if start < quiet_start < end:
+                end = quiet_start  # it was spoken before the silence
+            elif quiet_start <= start < quiet_end < end:
+                start = quiet_end  # it was spoken after it
         if start < end and s.text.strip() and not is_annotation(s.text):
             kept.append(TranscriptSpan(start, end, s.text.strip()))
     return collapse_repetition_loops(kept)
@@ -96,16 +112,23 @@ def plan_segments(duration: float, spans: list[TranscriptSpan], recipe: dict) ->
         count = max(1, round(duration / step))
         edges = [duration * i / count for i in range(count + 1)]
         return [(edges[i], edges[i + 1], []) for i in range(count)]
+    gap = recipe.get("silent_gap_seconds", float("inf"))  # a silence this long is a Segment of its own
     groups: list[list[TranscriptSpan]] = [[]]
     for s in spans:
-        if groups[-1] and s.end - groups[-1][0].start > recipe["segment_target_seconds"]:
+        if groups[-1] and (s.end - groups[-1][0].start > recipe["segment_target_seconds"]
+                           or s.start - groups[-1][-1].end >= gap):
             groups.append([])
         groups[-1].append(s)
     segments = []
+    if spans[0].start >= gap:
+        segments.append((0.0, spans[0].start, []))
     for i, group in enumerate(groups):
-        start = 0.0 if i == 0 else group[0].start
+        start = 0.0 if i == 0 and not segments else group[0].start
         end = duration if i == len(groups) - 1 else groups[i + 1][0].start
-        segments.append((start, end, group))
+        if end - group[-1].end >= gap:
+            segments += [(start, group[-1].end, group), (group[-1].end, end, [])]
+        else:
+            segments.append((start, end, group))
     return segments
 
 
@@ -130,9 +153,19 @@ class Worker:
         """The Project as the app reviews it: saved context, notes, exclusions, and suggested relationships."""
         snapshot = self.store.snapshot(project_id)
         segments = [s for c in snapshot["clips"] for s in c["segments"]]
-        related = Index(self.home).review_relationships([s["id"] for s in segments])
+        related = Index(self.home).review_relationships(project_id, [s["id"] for s in segments])
         for s in segments:
             s["relationships"] = related[s["id"]]
+        return self._live(snapshot)
+
+    def library_snapshot(self) -> dict:
+        """Every library source as the app reviews it, with its Projects but no Project notes."""
+        snapshot = self.store.library_snapshot()
+        for s in (s for c in snapshot["clips"] for s in c["segments"]):
+            s["relationships"] = []
+        return self._live(snapshot)
+
+    def _live(self, snapshot: dict) -> dict:
         for clip in snapshot["clips"]:  # report what MCP reports, even before the next check_sources
             if (status := live_status(clip)) != clip["status"]:
                 clip["status"], clip["error"] = status, (
@@ -141,30 +174,59 @@ class Worker:
         return snapshot
 
     def remove_clips(self, project_id: str, clip_ids: list[str]) -> None:
-        """Forget clips: their saved context and Clipcon's frame cache. The original video files stay untouched."""
-        self.store.remove_clips(project_id, clip_ids)
+        """Remove clips from a Project (its notes and exclusions for them). Their library context stays."""
+        self.store.remove_memberships(project_id, clip_ids)
+
+    def remove_from_library(self, clip_ids: list[str]) -> list[str]:
+        """Forget sources everywhere: their saved context, Project memberships and Clipcon's frame cache.
+        The original video files stay untouched. Returns the Projects they were removed from."""
+        projects = self.store.remove_from_library(clip_ids)
         for clip_id in clip_ids:
             shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+        return projects
 
     def delete_project(self, project_id: str) -> None:
-        """Forget a Project and all its clips' saved context. The original video files stay untouched."""
-        for clip_id in self.store.delete_project(project_id):
-            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)
+        """Forget a Project and its notes and exclusions. Its footage stays in the library, originals untouched."""
+        self.store.delete_project(project_id)
+
+    def add_to_project(self, project_id: str, clip_ids: list[str]) -> dict:
+        """Associate library sources with a Project, reusing their analysis (no inference)."""
+        for clip_id in clip_ids:
+            self.store.add_membership(project_id, clip_id)
+        return self._outcome(clip_ids)
 
     def analysis_key(self, content_fingerprint: str) -> str:
         material = json.dumps({"source": content_fingerprint, "recipe": self.recipe,
                                "speech": self.speech.identity, "vision": self.vision.identity}, sort_keys=True)
         return hashlib.sha256(material.encode()).hexdigest()
 
-    def import_clip(self, project_id: str, source: Path, progress: Progress | None = None) -> dict:
-        report = progress or (lambda stage, detail: None)
-        source = Path(source).expanduser().resolve()
-        if self.store.project(project_id) is None:
+    def _register(self, project_id: str | None, source: Path) -> tuple[str, bool]:
+        """The library source for this original, added to the Project when one is given: an existing source at
+        the same path is reused (its content is verified before its analysis is), otherwise a new one is
+        registered. Returns (clip_id, newly registered)."""
+        if project_id is not None and self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
-        existing = self.store.clip_by_path(project_id, str(source))
-        clip_id = existing["id"] if existing else new_id("clp")
-        if not existing:
-            self.store.add_clip(clip_id, project_id, str(source), source.name)
+        existing = self.store.source_by_path(str(source), project_id)
+        if existing:
+            if project_id is not None:
+                self.store.add_membership(project_id, existing["id"])
+            return existing["id"], False
+        clip_id = new_id("clp")
+        self.store.add_clip(clip_id, str(source), source.name, project_id)
+        return clip_id, True
+
+    def import_clip(self, project_id: str | None, source: Path, progress: Progress | None = None) -> dict:
+        """Index one original into a Project, or into the library alone when project_id is None. Footage the
+        library already analysed unchanged gains a membership and reuses that analysis."""
+        source = Path(source).expanduser().resolve()
+        clip_id, _ = self._register(project_id, source)
+        return self._index(clip_id, source, progress)
+
+    def _index(self, clip_id: str, source: Path, progress: Progress | None = None, refresh: bool = False) -> dict:
+        """Analyse a source unless its saved analysis already describes this content. Importing reuses an
+        analysis made under compatible settings; refresh (an explicit re-analysis) requires current ones."""
+        report = progress or (lambda stage, detail: None)
+        existing = self.store.clip(clip_id)
 
         def stage(name: str, **detail) -> None:
             self.store.set_status(clip_id, "indexing", stage=name)
@@ -183,7 +245,8 @@ class Worker:
                 stage("fingerprinting")
                 content = fingerprint(source)
             key = self.analysis_key(content)
-            if analysed and existing["fingerprint"] == content and existing["analysis_key"] == key:
+            if analysed and existing["fingerprint"] == content and (
+                    existing["analysis_key"] == key or not refresh and not self._settings_changed(existing)):
                 # The saved context describes exactly this content under these settings (e.g. a restored
                 # original, or a retry after a failed re-analysis): publish it as current again, without inference.
                 self.store.set_source(clip_id, str(source), source.name, stat.st_size, stat.st_mtime)
@@ -202,6 +265,10 @@ class Worker:
             )
             report("ready", {"clip_id": clip_id, "reused": False, "revision": revision})
             return {"clip_id": clip_id, "reused": False, "revision": revision}
+        except SourceRemoved:
+            shutil.rmtree(self.home / "frames" / clip_id, ignore_errors=True)  # nothing of it is published
+            report("removed", {"clip_id": clip_id})
+            return {"clip_id": clip_id, "removed": True}
         except ServiceUnavailable as e:
             # An outage says nothing about saved context that was usable before: a refresh of a ready, stale or
             # missing clip leaves it as it was. Anything else records the failure, for a retry once it is back.
@@ -220,14 +287,20 @@ class Worker:
                 report("failed", {"clip_id": clip_id, "error": str(e)})
             raise
 
-    def retry(self, project_id: str, clip_ids: list[str], progress: Progress | None = None) -> dict:
+    def _require(self, project_id: str | None, clip_id: str) -> None:
+        if project_id is None:
+            if self.store.clip(clip_id) is None:
+                raise ValueError(f"unknown clip {clip_id}")
+        else:
+            self.store.require_member(project_id, clip_id)
+
+    def retry(self, project_id: str | None, clip_ids: list[str], progress: Progress | None = None) -> dict:
         """Re-run analysis for chosen clips from their originals, keeping each clip's ID, notes and exclusion.
-        Unchanged content with unchanged settings is reused; a missing original is reported, not analysed."""
+        Unchanged content with unchanged settings is reused; a missing original is reported, not analysed.
+        A shared source's refreshed analysis serves every Project it belongs to."""
         report = progress or (lambda stage, detail: None)
         for clip_id in clip_ids:
-            clip = self.store.clip(clip_id)
-            if clip is None or clip["project_id"] != project_id:
-                raise ValueError(f"clip {clip_id} is not in project {project_id}")
+            self._require(project_id, clip_id)
         for clip_id in clip_ids:
             clip = self.store.clip(clip_id)
             source = Path(clip["source_path"])
@@ -236,21 +309,22 @@ class Worker:
                 report("missing", {"clip_id": clip_id, "error": missing_guidance(clip["source_path"])})
                 continue
             try:
-                self.import_clip(project_id, source, progress)
+                self._index(clip_id, source, progress, refresh=True)
             except ServiceUnavailable:
                 raise  # no clip can be analysed now; the rest keep their state for a later retry
             except Exception:
                 continue  # recorded on the clip; the others carry on
         return self._outcome(clip_ids)
 
-    def check_sources(self, project_id: str, progress: Progress | None = None) -> dict:
+    def check_sources(self, project_id: str | None, progress: Progress | None = None) -> dict:
         """Re-verify every analysed clip against its original and the current analysis settings. A missing
         original marks the clip missing; changed content or settings mark it stale; an original that is back
         and unchanged makes it ready again. Saved context, notes and exclusions are kept throughout."""
         report = progress or (lambda stage, detail: None)
-        if self.store.project(project_id) is None:
+        if project_id is not None and self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
-        clips = [c for c in self.store.clips(project_id)
+        candidates = self.store.library_clips() if project_id is None else self.store.clips(project_id)
+        clips = [c for c in candidates
                  if c["revision"] > 0 and c["status"] in ("ready", "stale", "missing")]
         for clip in clips:
             status, error = self._verify(clip, report)
@@ -259,18 +333,17 @@ class Worker:
                 report(status, {"clip_id": clip["id"], "error": error})
         return self._outcome([c["id"] for c in clips])
 
-    def relink(self, project_id: str, clip_id: str, source: Path) -> dict:
+    def relink(self, project_id: str | None, clip_id: str, source: Path) -> dict:
         """Point a clip at its original's new location. Only the same content is accepted, so a clip's context,
         notes and relationships are never reassigned to different footage; a different file is a new clip."""
+        self._require(project_id, clip_id)
         clip = self.store.clip(clip_id)
-        if clip is None or clip["project_id"] != project_id:
-            raise ValueError(f"clip {clip_id} is not in project {project_id}")
         source = Path(source).expanduser().resolve()
         if not source.is_file():
             raise ValueError(f"{source} is not a file")
-        other = self.store.clip_by_path(project_id, str(source))
+        other = self.store.source_by_path(str(source), project_id)
         if other and other["id"] != clip_id:
-            raise ValueError(f"{source.name} is already clip {other['id']} in this Project")
+            raise ValueError(f"{source.name} is already clip {other['id']} in the library")
         if not clip["fingerprint"]:  # never analysed: nothing proves the file is this clip's footage
             raise ValueError(f"{clip['original_filename']} was never analysed, so {source.name} cannot be confirmed "
                              "as the same footage. Import it as a new clip instead.")
@@ -311,7 +384,11 @@ class Worker:
         if analysis is None:
             return []
         changed = []
-        if json.loads(analysis["recipe"]) != json.loads(json.dumps(self.recipe)):
+        saved_recipe, recipe = json.loads(analysis["recipe"]), json.loads(json.dumps(self.recipe))
+        if saved_recipe != recipe and not (
+                saved_recipe.get("version") in COMPATIBLE_RECIPE_VERSIONS
+                and {k: v for k, v in saved_recipe.items() if k not in ROLE_ONLY_KEYS}
+                == {k: v for k, v in recipe.items() if k not in ROLE_ONLY_KEYS}):
             changed.append("analysis recipe")
         if json.loads(analysis["speech_identity"]) != json.loads(json.dumps(self.speech.identity)):
             changed.append("speech model")
@@ -323,19 +400,20 @@ class Worker:
         return changed
 
     def _outcome(self, clip_ids: list[str]) -> dict:
-        clips = [self.store.clip(c) for c in clip_ids]
+        clips = [(c, self.store.clip(c)) for c in clip_ids]
         return {"clips": [{"clip_id": c["id"], "original_filename": c["original_filename"], "status": c["status"],
-                           "error": c["error"]} for c in clips]}
+                           "error": c["error"]} if c else {"clip_id": cid, "status": "removed"}
+                          for cid, c in clips]}
 
-    def import_folder(self, project_id: str, folder: Path, progress: Progress | None = None) -> dict:
+    def import_folder(self, project_id: str | None, folder: Path, progress: Progress | None = None) -> dict:
         return self.import_sources(project_id, [folder], progress)
 
-    def import_sources(self, project_id: str, paths: list[Path], progress: Progress | None = None) -> dict:
+    def import_sources(self, project_id: str | None, paths: list[Path], progress: Progress | None = None) -> dict:
         """Register every chosen video file, and every video in chosen folders (and their subfolders, skipping
         hidden ones), as pending, then index each one. A clip that fails stays failed while the others continue;
         if the local model service is unavailable, the import stops with that error and the rest stay pending."""
         report = progress or (lambda stage, detail: None)
-        if self.store.project(project_id) is None:
+        if project_id is not None and self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
         found: set[Path] = set()
         for path in (Path(p).expanduser().resolve() for p in paths):
@@ -349,19 +427,20 @@ class Worker:
         sources = sorted({p.resolve() for p in found if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES})
         if not sources:
             raise ValueError("no video files in the chosen items")
+        registered = []
         for source in sources:
-            if not self.store.clip_by_path(project_id, str(source)):
-                clip_id = new_id("clp")
-                self.store.add_clip(clip_id, project_id, str(source), source.name)
+            clip_id, new = self._register(project_id, source)
+            registered.append(clip_id)
+            if new:
                 report("pending", {"clip_id": clip_id, "filename": source.name})
-        for source in sources:
+        for clip_id, source in zip(registered, sources):
             try:
-                self.import_clip(project_id, source, progress)
+                self._index(clip_id, source, progress)
             except ServiceUnavailable:
                 raise  # no clip can be analysed now; the rest stay pending for a retry
             except Exception:
                 continue  # recorded on the clip as failed; the rest of the Project carries on
-        return self._outcome([self.store.clip_by_path(project_id, str(s))["id"] for s in sources])
+        return self._outcome(registered)
 
     def _describe(self, request: SegmentRequest, attempts: int = 2):
         """Ask the model for validated context, retrying once when its output fails validation."""
@@ -389,7 +468,9 @@ class Worker:
                     wav = media.extract_audio(source, Path(tmp) / "audio.wav")
                     stage("transcribing")
                     transcript = self.speech.transcribe(wav)
-                    spans, language = clean_spans(transcript.spans, info.duration), transcript.language
+                    quiet = (media.silences(wav, recipe["silent_gap_seconds"], recipe["silence_noise_db"])
+                             if "silence_noise_db" in recipe else [])
+                    spans, language = clean_spans(transcript.spans, info.duration, quiet), transcript.language
             planned = plan_segments(info.duration, spans, recipe)
             per_segment = recipe["frames_per_segment"]
             if len(planned) * per_segment > recipe["max_frames"]:
@@ -416,7 +497,10 @@ class Worker:
                 stage("describing", segment=ordinal + 1, of=len(planned))
                 desc = self._describe(request)
                 facing += bool(group) and desc.speaker_facing_camera
+                role, role_basis = roles.suggest(start, end, sum(s.end - s.start for s in group),
+                                                 desc.speaker_facing_camera)
                 segments.append({
+                    "role": role, "role_basis": role_basis,
                     "id": new_id("seg"), "ordinal": ordinal, "start": start, "end": end, "label": desc.label,
                     "transcript": transcript, "frames": frames,
                     "observations": [(local[fid], text) for fid, text in desc.observations],

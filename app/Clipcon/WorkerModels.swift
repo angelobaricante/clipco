@@ -58,6 +58,11 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     var note: CreatorNote?
     var analysis: Analysis?
     var segments: [Segment]
+    /// Source-wide: may this footage be offered as B-roll outside its own Projects?
+    var reuseAllowed: Bool
+    /// Every Project this library source belongs to (its analysis is shared; notes are not).
+    var projects: [ProjectMembership]
+    var roleSummary: RoleSummary
 
     var displayLabel: String { label ?? originalFilename }
 
@@ -73,6 +78,35 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
         speechLanguage.map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
     }
     var thumbnailPath: String? { segments.first?.observations.first?.frame.path }
+}
+
+struct ProjectMembership: Decodable, Hashable, Sendable {
+    var projectId: String
+    var name: String
+    var excluded: Bool
+}
+
+struct RoleSummary: Decodable, Hashable, Sendable {
+    var text: String
+}
+
+/// A Segment's footage role: suggested in code from its evidence, with the creator's correction kept apart.
+struct SegmentRole: Decodable, Hashable, Sendable {
+    var suggested: String
+    var basis: String
+    var creator: String?
+    var effective: String
+
+    static let choices = ["a-roll", "b-roll", "mixed", "needs_review"]
+
+    static func name(_ role: String) -> String {
+        switch role {
+        case "a-roll": "A-roll"
+        case "b-roll": "B-roll"
+        case "mixed": "Mixed"
+        default: "Needs review"
+        }
+    }
 }
 
 /// Written by the creator in Clipcon, about the whole Source clip; kept apart from model output.
@@ -128,6 +162,7 @@ struct Segment: Decodable, Identifiable, Hashable, Sendable {
     var transcript: [Line]
     var observations: [Observation]
     var interpretation: Interpretation
+    var role: SegmentRole
     var relationships: [RelatedSegment]
 }
 

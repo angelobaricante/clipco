@@ -144,8 +144,23 @@ struct WorkerClient: Sendable {
     }
 
     /// Saves the creator's note for a clip through the worker, the index's only writer. Empty text clears it.
-    func setNote(clipID: String, text: String) async throws {
-        _ = try await run(["set-note", "--clip", clipID, "--text", text])
+    func setNote(projectID: String, clipID: String, text: String) async throws {
+        _ = try await run(["set-note", "--project", projectID, "--clip", clipID, "--text", text])
+    }
+
+    /// Allows or prevents reuse of sources as B-roll outside their own Projects. Reversible.
+    func setReuse(clipIDs: [String], allowed: Bool) async throws {
+        _ = try await run(["set-reuse", "--allowed", allowed ? "yes" : "no"] + clipIDs)
+    }
+
+    /// Records the creator's role for a Segment; nil clears it so the suggested role applies again.
+    func setSegmentRole(segmentID: String, role: String?) async throws {
+        _ = try await run(["set-segment-role", "--segment", segmentID, "--role", role ?? "suggested"])
+    }
+
+    /// Forgets sources everywhere: saved context, every Project membership, and the frame cache. Originals stay.
+    func removeFromLibrary(clipIDs: [String]) async throws {
+        _ = try await run(["remove-from-library"] + clipIDs)
     }
 
     /// Excludes clips from, or restores them to, new default search results. No context is deleted.
@@ -153,12 +168,12 @@ struct WorkerClient: Sendable {
         _ = try await run(["set-excluded", "--project", projectID, "--excluded", excluded ? "yes" : "no"] + clipIDs)
     }
 
-    /// Forgets clips' saved context and frame cache. The original video files are never touched.
+    /// Removes clips from one Project (its note and exclusion for them). Their library context is kept.
     func removeClips(projectID: String, clipIDs: [String]) async throws {
         _ = try await run(["remove-clips", "--project", projectID] + clipIDs)
     }
 
-    /// Forgets a Project and all its saved context. The original video files are never touched.
+    /// Forgets a Project, its notes and exclusions. Its footage stays in the library; originals are never touched.
     func deleteProject(projectID: String) async throws {
         _ = try await run(["delete-project", "--project", projectID])
     }
