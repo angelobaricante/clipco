@@ -40,6 +40,8 @@ When the task's acceptance criteria are satisfied, link its PR to the issue. Clo
 
 ## Durable context
 
+- Next improvement cycle: [Reusable footage and import design](design/reusable-footage-planning.md). The creator accepted 21 decisions; the consolidated brief awaits final shared-understanding confirmation before implementation issues are created. The completed MVP tasks above remain historical.
+
 - Product requirements: live parent spec plus the committed spec snapshot.
 - Domain terms: GLOSSARY.md.
 - Approved native direction: design notes and screenshot.
