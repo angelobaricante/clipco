@@ -1,0 +1,123 @@
+{
+  "recorded_at": "2026-10-10T00:01:22+08:00",
+  "machine": {
+    "model": "Mac17,2",
+    "chip": "Apple M5",
+    "memory_gb": 24,
+    "macos": "26.5.1"
+  },
+  "memory": {
+    "worker_plus_largest_child_peak_mb": 1974,
+    "note": "worker peak = this process + its largest child (ru_maxrss), measured at report time",
+    "ollama_resident_mb": null,
+    "ollama_resident_unavailable": "ps: [Errno 1] Operation not permitted: 'ps'",
+    "ollama_loaded_models": [
+      {
+        "name": "qwen3.5:4b-q4_K_M",
+        "size_mb": 3254,
+        "size_vram_mb": 3254
+      }
+    ]
+  },
+  "offline": {
+    "internet_reachable": false,
+    "method": "TCP connect (with DNS lookup for names), 3s timeout, from this process",
+    "targets": [
+      {
+        "target": "1.1.1.1:443",
+        "reachable": false,
+        "error": "PermissionError: [Errno 1] Operation not permitted"
+      },
+      {
+        "target": "8.8.8.8:53",
+        "reachable": false,
+        "error": "PermissionError: [Errno 1] Operation not permitted"
+      },
+      {
+        "target": "captive.apple.com:80",
+        "reachable": false,
+        "error": "PermissionError: [Errno 1] Operation not permitted"
+      }
+    ]
+  },
+  "models": {
+    "speech": {
+      "engine": "whisper.cpp",
+      "model": "ggml-large-v3-turbo.bin",
+      "model_bytes": 1624555275,
+      "language": "auto",
+      "prompt": "Hello, everyone. Kumusta kayo? Today, ipapakita ko kung paano ito gumagana.",
+      "max_context": 64,
+      "vad_model": "ggml-silero-v5.1.2.bin"
+    },
+    "vision": {
+      "engine": "ollama",
+      "model": "qwen3.5:4b-q4_K_M",
+      "digest": "d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04"
+    }
+  },
+  "import": {
+    "clip_id": "clp_85bd07dcc1b54df5",
+    "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+    "duration": 69.933333,
+    "status": "ready",
+    "live_inference": true,
+    "revision": 1,
+    "segments": 3,
+    "elapsed_seconds": 30.14
+  },
+  "searches": [
+    {
+      "query": "DJI camera",
+      "elapsed_ms": 0.4,
+      "top": [
+        {
+          "segment_id": "seg_4495f2645d1d41fa",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 0.0,
+          "end": 30.36
+        },
+        {
+          "segment_id": "seg_3b7c5093ebd44c53",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 30.36,
+          "end": 60.37
+        },
+        {
+          "segment_id": "seg_e5e8520ad6ec47d4",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 60.37,
+          "end": 69.933333
+        }
+      ]
+    },
+    {
+      "query": "presenter talking to camera",
+      "elapsed_ms": 0.3,
+      "top": [
+        {
+          "segment_id": "seg_4495f2645d1d41fa",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 0.0,
+          "end": 30.36
+        },
+        {
+          "segment_id": "seg_3b7c5093ebd44c53",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 30.36,
+          "end": 60.37
+        },
+        {
+          "segment_id": "seg_e5e8520ad6ec47d4",
+          "original_filename": "611D69BD-4987-4B6E-86DA-915D2D36B006.MP4",
+          "start": 60.37,
+          "end": 69.933333
+        }
+      ]
+    }
+  ],
+  "verdict": {
+    "offline_verified": true,
+    "reasons": []
+  }
+}

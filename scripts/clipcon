@@ -4,6 +4,10 @@
 #   scripts/clipcon start    local-only Ollama, worker deps, warm vision model, build + open the app
 #   scripts/clipcon stop     quit the app, unload the model, stop the Ollama this script started
 #   scripts/clipcon status   show what is running and whether analysis is ready
+#   scripts/clipcon offline-proof [--sandbox] --project ID CLIP [--query TEXT]...
+#                            restart Ollama cold, index CLIP live with networking off, search it, save a report
+#                            (--sandbox denies non-loopback network to Ollama and the worker via sandbox-exec
+#                            instead of turning the Mac's networking off: a process-level proof only)
 #
 # Ollama always runs on loopback with cloud features disabled; this script never uses cloud inference.
 set -euo pipefail
@@ -118,9 +122,41 @@ status() {
   say "Codex MCP" "$mcp helper process(es) running (Codex starts these on demand)"
 }
 
+offline_proof() {
+  local sandbox=()
+  if [[ "${1:-}" == "--sandbox" ]]; then sandbox=(sandbox-exec -f "$ROOT/scripts/offline.sb"); shift; fi
+  [[ -x "$WORKER" ]] || fail "worker not set up (run start once while online)"
+  check_assets
+  if pgrep -f "ollama serve" >/dev/null; then
+    say "Ollama" "stopping, so the proof starts from a cold restart"
+    pkill -f "ollama serve" || true
+    for _ in $(seq 1 20); do ollama_up || break; sleep 0.5; done
+  fi
+  say "Ollama" "starting cold on $OLLAMA_ADDR${sandbox:+ inside the network-deny sandbox}"
+  OLLAMA_HOST="$OLLAMA_ADDR" OLLAMA_NO_CLOUD=1 nohup ${sandbox[@]+"${sandbox[@]}"} ollama serve >>"$LOGS/ollama.log" 2>&1 &
+  echo $! >"$RUN/ollama.pid"
+  for _ in $(seq 1 30); do ollama_up && break; sleep 0.5; done
+  ollama_up || fail "Ollama did not start; see $LOGS/ollama.log"
+  say "Proof" "indexing live with the internet unreachable (this loads the models cold)"
+  local code=0
+  ${sandbox[@]+"${sandbox[@]}"} "$WORKER" offline-proof "$@" | grep -v '"event": "progress"' \
+    | python3 -c 'import json,sys
+for line in sys.stdin:
+    e = json.loads(line)
+    if e["event"] == "error": print("Refused:", e["message"]); continue
+    r = e["report"]; i = r["import"]
+    print("Offline:", not r["offline"]["internet_reachable"], "-", "; ".join(t["target"] + " " + (t["error"] or "reachable") for t in r["offline"]["targets"]))
+    print("Import:", i["original_filename"], i["status"], "live" if i["live_inference"] else "REUSED", i["segments"], "segments in", i["elapsed_seconds"], "s")
+    for s in r["searches"]: print("Search:", repr(s["query"]), len(s["top"]), "results in", s["elapsed_ms"], "ms")
+    print("Verdict:", r["verdict"], "\nReport:", e["saved_to"])' || code=$?
+  [[ ${#sandbox[@]} -gt 0 ]] && { say "Ollama" "restarting outside the sandbox"; pkill -f "ollama serve" || true; sleep 1; start_ollama; }
+  return $code
+}
+
 case "${1:-}" in
   start) start_ollama; check_assets; start_worker; start_app; say "Ready." "Import footage with ⇧⌘I." ;;
   stop) stop_all; say "Stopped." ;;
   status) status ;;
-  *) echo "usage: scripts/clipcon start | stop | status" >&2; exit 2 ;;
+  offline-proof) shift; offline_proof "$@" ;;
+  *) echo "usage: scripts/clipcon start | stop | status | offline-proof [--sandbox] --project ID CLIP" >&2; exit 2 ;;
 esac

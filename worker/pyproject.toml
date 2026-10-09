@@ -10,6 +10,7 @@ dependencies = [
 [project.scripts]
 clipcon-worker = "clipcon_worker.cli:main"
 clipcon-mcp = "clipcon_worker.mcp_server:main"
+clipcon-benchmark = "clipcon_worker.benchmark:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

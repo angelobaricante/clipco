@@ -72,6 +72,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", required=True)
     p.add_argument("--clip", required=True)
     p.add_argument("source", type=Path)
+    p = sub.add_parser("offline-proof",
+                       help="with networking off: index one new clip live, search it, and save an evidence report")
+    p.add_argument("--project", required=True)
+    p.add_argument("--query", action="append", default=[], help="search to run afterwards (repeatable)")
+    p.add_argument("--report-dir", type=Path, default=Path.home() / ".clipcon" / "evidence")
+    p.add_argument("source", type=Path)
     p = sub.add_parser("snapshot")
     p.add_argument("--project", required=True)
     p = sub.add_parser("search", help="search the saved index (reads only; starts no model)")
@@ -120,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
                 outcome = (worker.check_sources(args.project, progress) if args.command == "check-sources"
                            else worker.retry(args.project, args.clip_ids, progress))
                 emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))
+            elif args.command == "offline-proof":
+                from .offline import offline_proof, write_report
+                report = offline_proof(worker, args.project, args.source, args.query or ["the main point"],
+                                       progress=lambda stage, detail: emit("progress", stage=stage, **detail))
+                emit("result", report=report, saved_to=str(write_report(report, args.report_dir, ollama.host)))
+                return 0 if report["verdict"]["offline_verified"] else 2
             elif args.command == "relink":
                 emit("result", **worker.relink(args.project, args.clip, args.source))
             elif args.command in ("import", "import-sources"):

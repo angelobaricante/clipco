@@ -1,0 +1,8 @@
+;; Deny every network connection except loopback, for a process-level offline proof.
+;; Clipcon's worker and a fresh `ollama serve` run inside it: they can reach each other on
+;; 127.0.0.1 but not the internet. The worker's report records the refused connection attempts.
+(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
