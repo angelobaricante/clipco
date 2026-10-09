@@ -176,3 +176,25 @@ def test_evidence_cited_as_its_prompt_line_is_matched_to_the_supplied_id(home, c
     for seg in saved["segments"]:
         assert seg["observations"] and all(o["frame"]["id"].startswith("frm_") for o in seg["observations"])
         assert seg["interpretation"]["evidence_ids"] and seg["interpretation"]["rejected_refs"] == []
+
+
+def test_the_project_description_reaches_agents_but_not_the_clip_descriptions(home, tmp_path):
+    """A clip is described from what it shows and says, not from what the creator hopes the video is about."""
+    from conftest import make_clip
+    from test_mcp import call, payload
+
+    from clipcon_worker.vision import SYSTEM_PROMPT, build_prompt
+
+    vision = RecordedVision()
+    worker = Worker(home, speech=RecordedSpeech([]), vision=vision)
+    project = worker.create_project("Demo", "Showing how to use clipcon")
+    worker.import_clip(project["id"], make_clip(tmp_path / "silent.mp4", seconds=6.0, audio=False))
+
+    prompts = [SYSTEM_PROMPT + build_prompt(r) for r in vision.requests]
+    assert prompts and not any("clipcon" in p.lower() or "how to use" in p for p in prompts)
+    # With no speech, the model is told not to claim anyone is talking or explaining.
+    assert all("no speech" in build_prompt(r) for r in vision.requests)
+    assert "do not say anyone is speaking" in SYSTEM_PROMPT.lower()
+
+    overview = payload(call(home, ("get_project_overview", {"project_id": project["id"]}))[0])
+    assert overview["project"]["context"] == "Showing how to use clipcon"

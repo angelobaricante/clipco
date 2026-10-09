@@ -19,7 +19,7 @@ Relationships (Spoken correction, Repeated take, suggested supporting B-roll) ar
 
 ## Current recipe
 
-- `RECIPE` version 5: about 30 s Segments with boundaries between transcript lines; 10 s Segments for clips without speech; 2 sampled frames per Segment (1 when a clip would exceed 24 frames); frames 512 px wide.
+- `RECIPE` version 6: about 30 s Segments with boundaries between transcript lines; 10 s Segments for clips without speech; 2 sampled frames per Segment (1 when a clip would exceed 24 frames); frames 512 px wide. The vision model describes only what the frames show and the transcript says. It does not receive the Project description, which reaches agents through `get_project_overview` instead. With no speech detected, it is told not to describe anyone as speaking or explaining.
 - Speech: whisper.cpp `ggml-large-v3-turbo.bin`, language auto-detected per clip. Only audio that Silero VAD (`ggml-silero-v5.1.2.bin`, sha256 `29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf`) detects as voice is transcribed. Without VAD, whisper invented "Konec." and "I don't know how much it is…" over the creator's silent B-roll.
 - Role: a clip is suggested as A-roll when speech covers at least half its duration **and** the vision model reports a person facing the camera, addressing the viewer, in at least half of its speaking Segments. Otherwise it is B-roll. The clip's `role_basis` records both measurements.
 - Vision: Ollama `qwen3.5:4b-q4_K_M`, digest `d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04` (Ollama 0.40.2).

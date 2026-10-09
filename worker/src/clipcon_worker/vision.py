@@ -38,7 +38,6 @@ class FrameItem:
 
 @dataclass(frozen=True)
 class SegmentRequest:
-    project_context: str
     original_filename: str
     start: float
     end: float
@@ -80,16 +79,17 @@ You receive sampled still frames (each with a frame ID) and the transcript lines
 Return JSON only:
 - label: a short descriptive label for this range (at most 8 words).
 - observations: one entry per frame, describing only what is visible in that still frame. Use the given frame_id. Do not guess what happens between frames.
-- interpretation: one or two sentences on what this range is about, combining speech and visuals. Say when something is uncertain.
+- interpretation: one or two sentences on what happens in this range, combining speech and visuals. Say when something is uncertain.
 - evidence_ids: the frame and transcript IDs that support your interpretation. Only use IDs you were given.
 - speaker_facing_camera: true only if a person is visible facing the camera and appears to be talking to the viewer (a direct-to-camera presenter). False for screens, objects, scenery, or people who are not addressing the camera.
 The transcript may be in English, Tagalog (Filipino), or a mix (Taglish). Understand it as spoken; write label, observations and interpretation in English.
+Describe only what the frames show and the transcript says. Do not guess the video's topic or purpose.
+When no speech was detected, do not say anyone is speaking, explaining, presenting or talking to the viewer: describe what they visibly do (for example, looking around or holding something).
 Never invent timestamps, IDs, quantities, or details that are not visible or spoken."""
 
 
 def build_prompt(request: SegmentRequest) -> str:
     lines = [
-        f"Project context: {request.project_context or '(none given)'}",
         f"Source clip: {request.original_filename}",
         f"Range: {request.start:.1f}s to {request.end:.1f}s",
         "Frames (attached images, in this order):",

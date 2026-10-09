@@ -17,7 +17,8 @@ from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailabl
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
-    "version": 5,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role
+    "version": 6,  # 2: multilingual speech; 3: drop non-speech annotations; 4: loop guard; 5: VAD + on-camera role;
+    #                6: describe what is shown/said only (no Project description; no "speaking" without speech)
     "segment_target_seconds": 30.0,
     "silent_segment_seconds": 10.0,
     "frames_per_segment": 2,
@@ -375,7 +376,6 @@ class Worker:
 
     def _analyse(self, clip_id: str, source: Path, stage: Callable) -> dict:
         recipe = self.recipe
-        project_context = self.store.project_context_for_clip(clip_id)
         stage("probing")
         info = media.probe(source)
         frames_dir = self.home / "frames" / clip_id / uuid.uuid4().hex[:8]
@@ -408,7 +408,6 @@ class Worker:
                 local = {f"t{i + 1}": t["id"] for i, t in enumerate(transcript)}
                 local |= {f"f{i + 1}": f["id"] for i, f in enumerate(frames)}
                 request = SegmentRequest(
-                    project_context=project_context,
                     original_filename=source.name, start=start, end=end,
                     transcript=[TranscriptItem(f"t{i + 1}", t["start"], t["end"], t["text"])
                                 for i, t in enumerate(transcript)],
