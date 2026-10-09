@@ -314,7 +314,7 @@ def test_a_roll_is_someone_speaking_to_camera_for_most_of_the_clip(home, tmp_pat
     assert "speech covers" in basis and "facing the camera" in basis
 
 
-def test_removing_a_clip_deletes_its_saved_context_but_never_the_original(home, tmp_path):
+def test_removing_a_clip_from_a_project_keeps_it_in_the_library_until_removed_from_there(home, tmp_path):
     from conftest import sha256
 
     project, worker = line_project(home, tmp_path)
@@ -327,33 +327,46 @@ def test_removing_a_clip_deletes_its_saved_context_but_never_the_original(home, 
 
     worker.remove_clips(pid, [broll["id"]])
 
-    overview, found, ctx, explained = call(
+    overview, found, in_project, in_library, explained, listing = call(
         home, ("get_project_overview", {"project_id": pid}),
         ("search_footage", {"project_id": pid, "query": "murky water jug"}),
-        ("get_segment_context", {"segment_id": old_segment}),
-        ("search_footage", {"project_id": pid, "query": "pour the dirty water into the top bucket"}))
+        ("get_segment_context", {"segment_id": old_segment, "project_id": pid}),
+        ("get_segment_context", {"segment_id": old_segment, "scope": "library"}),
+        ("search_footage", {"project_id": pid, "query": "pour the dirty water into the top bucket"}),
+        ("get_project_overview", {}))
     assert "broll-1-pour.mp4" not in {c["original_filename"] for c in payload(overview)["clips"]}
     assert all(r["original_filename"] != "broll-1-pour.mp4" for r in payload(found)["results"])
-    assert ctx.is_error  # its Segments no longer exist
+    assert in_project.is_error  # no longer this Project's context
+    assert payload(in_library)["creator_notes"] == [] and payload(in_library)["relationships"] == []
     assert all(rel["original_filename"] != "broll-1-pour.mp4"
                for r in payload(explained)["results"] for rel in r["relationships"])
+    assert payload(listing)["library"]["standalone_count"] == 1
+    assert (home / "frames" / broll["id"]).exists()  # its analysis is kept for reuse
+
+    worker.remove_from_library([broll["id"]])
+
+    [gone] = call(home, ("get_segment_context", {"segment_id": old_segment}))
+    assert gone.is_error  # its Segments no longer exist
     assert original.exists() and sha256(original) == before
     assert not (home / "frames" / broll["id"]).exists()  # Clipcon's own frame cache is cleaned up
 
 
-def test_deleting_a_project_leaves_other_projects_and_all_originals(home, tmp_path):
+def test_deleting_a_project_leaves_other_projects_its_library_footage_and_all_originals(home, tmp_path):
     project, worker = line_project(home, tmp_path)
     other = worker.create_project("Another video")
     footage = [Path(c["source_path"]) for c in worker.snapshot(project["id"])["clips"]]
 
     worker.delete_project(project["id"])
 
-    [listing, gone] = call(home, ("get_project_overview", {}),
-                           ("get_project_overview", {"project_id": project["id"]}))
+    [listing, gone, reusable] = call(home, ("get_project_overview", {}),
+                                     ("get_project_overview", {"project_id": project["id"]}),
+                                     ("search_footage", {"scope": "library", "query": "murky water jug"}))
     assert [p["project_id"] for p in payload(listing)["projects"]] == [other["id"]]
+    assert payload(listing)["library"] == {**payload(listing)["library"], "source_count": 4, "standalone_count": 4}
     assert gone.is_error
+    [pour] = payload(reusable)["results"]
+    assert pour["original_filename"] == "broll-1-pour.mp4" and pour["origins"] == []
     assert all(p.exists() for p in footage)
-    assert not any((home / "frames").iterdir())
 
 
 def test_several_chosen_clips_and_folders_join_one_project_once_each(home, tmp_path):

@@ -93,6 +93,7 @@ final class AppModel {
     var errorMessage: String?
     /// Awaiting confirmation in a destructive dialog.
     var clipsToRemove: [SourceClip] = []
+    var clipsToRemoveFromLibrary: [SourceClip] = []
     var projectToDelete: Project?
     var searchText = ""
     var searchResults: SearchPage?
@@ -168,9 +169,10 @@ final class AppModel {
     /// Saves the creator's note through the worker; Codex sees it in the next retrieval.
     func saveNote(_ text: String, for clipID: SourceClip.ID) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let clip = clips.first(where: { $0.id == clipID }), trimmed != (clip.note?.text ?? "") else { return }
+        guard let project, let clip = clips.first(where: { $0.id == clipID }),
+              trimmed != (clip.note?.text ?? "") else { return }
         do {
-            try await worker.setNote(clipID: clipID, text: trimmed)
+            try await worker.setNote(projectID: project.id, clipID: clipID, text: trimmed)
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
         } catch {
@@ -193,6 +195,36 @@ final class AppModel {
             if !trimmedQuery.isEmpty { await search() }
         } catch {
             errorMessage = "Could not \(excluded ? "exclude" : "include") the clip: \(error.localizedDescription)"
+        }
+    }
+
+    /// Allows or prevents reuse of a clip's footage outside its own Projects (source-wide, reversible).
+    func setReuse(_ clip: SourceClip, _ allowed: Bool) async {
+        do {
+            try await worker.setReuse(clipIDs: [clip.id], allowed: allowed)
+            try await reload()
+        } catch {
+            errorMessage = "Could not change reuse for \(clip.originalFilename): \(error.localizedDescription)"
+        }
+    }
+
+    /// Adds clips to another Project: one shared analysis, a new membership with its own note and exclusion.
+    func addToProject(_ targets: [SourceClip], _ destination: Project) async {
+        do {
+            try await worker.addToProject(projectID: destination.id, clipIDs: targets.map(\.id))
+            try await reload()
+        } catch {
+            errorMessage = "Could not add to \(destination.name): \(error.localizedDescription)"
+        }
+    }
+
+    /// Records the creator's role for one Segment (nil returns it to the suggested role).
+    func setRole(_ role: String?, for segment: Segment) async {
+        do {
+            try await worker.setSegmentRole(segmentID: segment.id, role: role)
+            try await reload()
+        } catch {
+            errorMessage = "Could not change the segment's role: \(error.localizedDescription)"
         }
     }
 
@@ -349,7 +381,22 @@ final class AppModel {
         }
     }
 
-    /// Forgets a Project and its saved context in Clipcon; the original video files stay where they are.
+    /// Forgets clips' saved context everywhere (every Project and the library); the originals stay where they are.
+    func removeFromLibrary(_ doomed: [SourceClip]) async {
+        guard canDelete, !doomed.isEmpty else { return }
+        let ids = Set(doomed.map(\.id))
+        do {
+            try await worker.removeFromLibrary(clipIDs: doomed.map(\.id))
+            if !selection.isDisjoint(with: ids) { select(visibleClips.first { !ids.contains($0.id) }?.id) }
+            try await reload()
+            if !trimmedQuery.isEmpty { await search() }
+        } catch {
+            let what = doomed.count == 1 ? doomed[0].originalFilename : "\(doomed.count) clips"
+            errorMessage = "Could not remove \(what) from the library: \(error.localizedDescription)"
+        }
+    }
+
+    /// Forgets a Project, its notes and exclusions; its footage stays in the library and originals are untouched.
     func delete(_ doomed: Project) async {
         guard canDelete else { return }
         do {

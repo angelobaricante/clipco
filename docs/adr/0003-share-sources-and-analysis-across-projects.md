@@ -1,0 +1,5 @@
+# Share source identity and analysis across Project memberships
+
+The creator accepted one Source clip and reusable unchanged analysis across Project memberships, retaining Project-specific notes and exclusions. Reimporting the same file should create an association rather than another analysis, and library discovery should group duplicates while preserving their associations. This replaces the original Project-owned clip model to prevent wasted inference and duplicate results; migration must preserve existing creator context and source references.
+
+The Footage library owns sources independently, supports direct import, and retains footage when its last Project is deleted. Project removal deletes memberships and Project notes; a separate Remove from Library action deletes saved context while preserving originals. Exclusion applies to the membership and its context, while source-level reuse permission gates all cross-project discovery; permitted memberships may support a result without exposing excluded membership notes.

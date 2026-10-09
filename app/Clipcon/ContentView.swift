@@ -72,9 +72,26 @@ struct ProjectDialogs: ViewModifier {
             ) { clips in
                 Button("Remove from Project", role: .destructive) { Task { await model.remove(clips) } }
             } message: { clips in
-                Text("Clipcon deletes its transcript, frame observations, and suggested relationships for "
-                     + (clips.count == 1 ? "this clip. The original video file stays where it is."
-                                         : "these clips. The original video files stay where they are."))
+                Text("Your notes and exclusions for " + (clips.count == 1 ? "it" : "them")
+                     + " in this Project are deleted. The analysed context stays in your Footage library for other "
+                     + "Projects, and the original video " + (clips.count == 1 ? "file stays where it is."
+                                                                                : "files stay where they are."))
+            }
+            .confirmationDialog(
+                model.clipsToRemoveFromLibrary.count == 1
+                    ? "Remove “\(model.clipsToRemoveFromLibrary[0].originalFilename)” from the Footage library?"
+                    : "Remove \(model.clipsToRemoveFromLibrary.count) clips from the Footage library?",
+                isPresented: Binding(get: { !model.clipsToRemoveFromLibrary.isEmpty },
+                                     set: { if !$0 { model.clipsToRemoveFromLibrary = [] } }),
+                presenting: model.clipsToRemoveFromLibrary
+            ) { clips in
+                Button("Remove from Library", role: .destructive) { Task { await model.removeFromLibrary(clips) } }
+            } message: { clips in
+                let projects = Set(clips.flatMap(\.projects).map(\.name)).sorted()
+                Text("Clipcon deletes the transcript, frame observations, roles, and every Project's notes for "
+                     + (clips.count == 1 ? "this clip" : "these clips")
+                     + (projects.isEmpty ? "" : " (in \(projects.joined(separator: ", ")))")
+                     + ". Codex can no longer retrieve it. The original video files are not affected.")
             }
             .confirmationDialog(
                 "Delete the Project “\(model.projectToDelete?.name ?? "")”?",
@@ -84,8 +101,8 @@ struct ProjectDialogs: ViewModifier {
             ) { project in
                 Button("Delete Project", role: .destructive) { Task { await model.delete(project) } }
             } message: { _ in
-                Text("Clipcon deletes the saved context for every clip in this Project, and Codex can no longer "
-                     + "retrieve it. Your original video files are not affected.")
+                Text("Clipcon deletes this Project's notes and exclusions. Its footage stays in your Footage "
+                     + "library with its analysed context. Your original video files are not affected.")
             }
             #if DEBUG
             // `-ClipconSelectionLog /path` records each selection change, to verify mouse selection from outside.

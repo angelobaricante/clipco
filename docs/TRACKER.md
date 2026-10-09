@@ -16,6 +16,20 @@ GitHub is the authoritative implementation tracker for `angelobaricante/clipcon`
 
 The implementation tasks are native sub-issues of the specification, with native blocking relationships. `ready-for-agent` means specified; it does not mean a blocked task may start. The spec issue is context, not an independently claimable implementation task.
 
+## Reusable footage improvement cycle
+
+The creator confirmed all 21 decisions and the consolidated implementation brief on 2026-10-10 (Asia/Manila). The [local specification snapshot](reusable-footage-spec.md), [design decision history](design/reusable-footage-planning.md), glossary, and ADRs record this extension of the completed MVP.
+
+| Order | Issue | Depends on |
+| --- | --- | --- |
+| Spec | [#15 — Reusable B-roll library and adaptive indexing](https://github.com/angelobaricante/clipcon/issues/15) | Confirmed design; not independently claimable |
+| 1 | [#16 — Shared library sources and Segment roles](https://github.com/angelobaricante/clipcon/issues/16) | None; check active claims |
+| 2 | [#17 — Grounded emotional tone and reusable retrieval](https://github.com/angelobaricante/clipcon/issues/17) | #16 |
+| 3 | [#18 — Project creation, native drops, and recoverable queue](https://github.com/angelobaricante/clipcon/issues/18) | #17 |
+| 4 | [#19 — Measured resource-adaptive processing](https://github.com/angelobaricante/clipcon/issues/19) | #18 |
+
+Tasks #16–19 are native sub-issues of #15, with native blocking dependencies in this order. All are specified with `ready-for-agent`; only #16 is initially unblocked. Do not reopen completed MVP tasks as a shortcut or claim the parent as implementation work.
+
 ## Start a session
 
 1. Read AGENTS.md, the live parent specification, the target issue, and its comments. Refresh remote Git state and inspect local changes.
@@ -39,6 +53,8 @@ Make the work recoverable from Git and issue comments. If incomplete, keep the i
 When the task's acceptance criteria are satisfied, link its PR to the issue. Close completed tasks through the agreed integration workflow, so native blockers release the next task. Avoid closing the parent specification while merely publishing tasks.
 
 ## Durable context
+
+- Next improvement cycle: [Reusable footage specification](reusable-footage-spec.md), [confirmed design](design/reusable-footage-planning.md), and issues #15–19. The completed MVP tasks above remain historical.
 
 - Product requirements: live parent spec plus the committed spec snapshot.
 - Domain terms: GLOSSARY.md.

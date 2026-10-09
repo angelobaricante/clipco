@@ -148,6 +148,30 @@ struct CreatorControls: View {
             }
         }
         .toggleStyle(.switch)
+        Toggle(isOn: Binding(get: { clip.reuseAllowed },
+                             set: { allowed in Task { await model.setReuse(clip, allowed) } })) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Allow reuse across projects")
+                Text(clip.reuseAllowed ? "Its B-roll segments can be suggested for other videos."
+                                       : "Only its own Projects can use it. Applies in every Project.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.switch)
+        LabeledContent("Segment roles", value: clip.roleSummary.text)
+        ForEach(clip.unmatchedRoleCorrections, id: \.self) { kept in
+            Label("Your \(SegmentRole.name(kept.role)) choice for \(kept.start.timecode)–\(kept.end.timecode) "
+                  + "no longer matches a segment after re-analysis. Choose the role again below.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
+        if clip.projects.count > 1 {
+            LabeledContent("Also in") {
+                Text(clip.projects.filter { $0.projectId != model.project?.id }.map(\.name)
+                    .joined(separator: ", "))
+            }
+            .help("One shared analysis; each Project keeps its own note and exclusion")
+        }
     }
 
     private func save() {
@@ -195,6 +219,7 @@ struct ContextSection: View {
                         .help("Play the original from \(segment.start.timecode)")
                         .accessibilityLabel("Play from \(segment.start.timecode) to \(segment.end.timecode)")
                 }
+                SegmentRolePicker(segment: segment)
                 EvidenceGroup(title: "Model interpretation", symbol: "sparkles",
                               note: segment.interpretation.model) {
                     Text(segment.interpretation.text)
@@ -243,6 +268,34 @@ struct ContextSection: View {
             }
             .font(.callout)
             Divider()
+        }
+    }
+}
+
+/// The Segment's footage role: the creator's choice, or the suggestion and its basis when there is none.
+struct SegmentRolePicker: View {
+    @Environment(AppModel.self) private var model
+    let segment: Segment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Picker("Role", selection: Binding(
+                get: { segment.role.creator ?? "" },
+                set: { choice in Task { await model.setRole(choice.isEmpty ? nil : choice, for: segment) } })) {
+                Text("Suggested: \(SegmentRole.name(segment.role.suggested))").tag("")
+                Divider()
+                ForEach(SegmentRole.choices, id: \.self) { Text(SegmentRole.name($0)).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .accessibilityLabel("Footage role from \(segment.start.timecode) to \(segment.end.timecode)")
+            Text(segment.role.creator == nil ? segment.role.basis
+                                             : "Set by you. Suggested \(SegmentRole.name(segment.role.suggested)): "
+                                               + segment.role.basis)
+                .font(.caption).foregroundStyle(.secondary)
+            if segment.role.effective == "mixed" || segment.role.effective == "needs_review" {
+                Text("Not offered for reuse until you choose a role.").font(.caption).foregroundStyle(.orange)
+            }
         }
     }
 }
@@ -306,14 +359,17 @@ struct InfoSection: View {
                 if let language = clip.speechLanguageName { LabeledContent("Spoken language", value: "\(language) (detected)") }
                 LabeledContent("Codecs", value: [clip.videoCodec, clip.audioCodec].compactMap { $0 }
                     .joined(separator: " / "))
+                LabeledContent("Segment roles", value: clip.roleSummary.text)
                 if let role = clip.role {
-                    LabeledContent("Role", value: role == "a-roll" ? "A-roll" : "B-roll")
+                    LabeledContent("Whole-clip role", value: role == "a-roll" ? "A-roll" : "B-roll")
                     if let basis = clip.roleBasis { Text("Suggested: \(basis)").font(.caption).foregroundStyle(.secondary) }
                 }
             }
             Section("Index") {
                 LabeledContent("Status", value: clip.status.rawValue.capitalized)
                 LabeledContent("Retrieval", value: clip.excluded ? "Excluded from default search" : "Included")
+                LabeledContent("Reuse across projects", value: clip.reuseAllowed ? "Allowed" : "Not allowed")
+                LabeledContent("Projects", value: clip.projects.map(\.name).joined(separator: ", "))
                 LabeledContent("Revision", value: "\(clip.revision)")
                 if let project { LabeledContent("Project ID") { Text(project.id).textSelection(.enabled) } }
                 LabeledContent("Clip ID") { Text(clip.id).textSelection(.enabled) }
