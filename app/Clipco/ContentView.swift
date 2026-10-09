@@ -236,6 +236,19 @@ struct SidebarView: View {
 }
 
 /// Visible connection entry points; configured means saved locally, not an active agent session.
+struct AgentLogo: View {
+    let agent: EditingAgent
+    let size: CGFloat
+
+    var body: some View {
+        Image(agent == .codex ? "CodexAgent" : "ClaudeAgent")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
 struct AgentConnectionRow: View {
     @Environment(AppModel.self) private var model
     let agent: EditingAgent
@@ -243,7 +256,7 @@ struct AgentConnectionRow: View {
     var body: some View {
         Button { model.agentConnection = agent } label: {
             HStack(spacing: 8) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
+                AgentLogo(agent: agent, size: 22)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agent.rawValue)
                     Text(summary).font(.caption).foregroundStyle(.secondary)
@@ -293,7 +306,10 @@ struct AgentConnectionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("\(agent.rawValue) Connection").font(.title2.weight(.semibold))
+            HStack(spacing: 12) {
+                AgentLogo(agent: agent, size: 36)
+                Text("\(agent.rawValue) Connection").font(.title2.weight(.semibold))
+            }
             Text("Let your agent find footage, read its context, and locate the original clips.")
                 .foregroundStyle(.secondary)
             if agent == .claude {
