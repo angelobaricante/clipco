@@ -169,6 +169,24 @@ struct WorkerClient: Sendable {
         try await run(["import-sources", "--project", projectID] + sources.map(\.path), onEvent: onProgress)
     }
 
+    /// Re-verifies analysed clips' originals: missing ones become missing, changed content or analysis settings
+    /// make them stale, and originals that are back and unchanged make them ready again. Context is kept.
+    func checkSources(projectID: String,
+                      onProgress: @escaping @Sendable (WorkerEvent) async -> Void = { _ in }) async throws {
+        _ = try await run(["check-sources", "--project", projectID], onEvent: onProgress)
+    }
+
+    /// Re-analyses clips from their originals, keeping each clip's ID, note, and exclusion.
+    func retry(projectID: String, clipIDs: [String],
+               onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
+        try await run(["retry", "--project", projectID] + clipIDs, onEvent: onProgress)
+    }
+
+    /// Points a clip at its original in a new location. The worker accepts only the same content.
+    func relink(projectID: String, clipID: String, source: URL) async throws {
+        _ = try await run(["relink", "--project", projectID, "--clip", clipID, source.path])
+    }
+
     func importClip(projectID: String, source: URL,
                     onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
         try await run(["import", "--project", projectID, source.path], onEvent: onProgress)

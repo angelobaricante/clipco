@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS creator_notes (
   clip_id TEXT PRIMARY KEY REFERENCES source_clips(id), text TEXT NOT NULL, updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS retired_segments (
+  id TEXT PRIMARY KEY, clip_id TEXT NOT NULL REFERENCES source_clips(id), revision INTEGER NOT NULL,
+  retired_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS relationships (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), kind TEXT NOT NULL,
   a_segment TEXT NOT NULL REFERENCES segments(id), b_segment TEXT NOT NULL REFERENCES segments(id),
@@ -123,7 +127,9 @@ class Store:
             project_id = db.execute("SELECT project_id FROM source_clips WHERE id=?", (clip_id,)).fetchone()[0]
             db.execute("DELETE FROM relationships WHERE project_id=?", (project_id,))
             old = [r[0] for r in db.execute("SELECT id FROM segments WHERE clip_id=?", (clip_id,))]
-            for seg_id in old:
+            for seg_id in old:  # replaced, but an agent may still hold the ID: remember whose it was
+                db.execute("INSERT OR REPLACE INTO retired_segments VALUES (?,?,?,?)",
+                           (seg_id, clip_id, revision - 1, time.time()))
                 db.execute("DELETE FROM observations WHERE segment_id=?", (seg_id,))
                 db.execute("DELETE FROM frames WHERE segment_id=?", (seg_id,))
                 db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
@@ -153,6 +159,23 @@ class Store:
         except BaseException:
             db.execute("ROLLBACK")
             raise
+
+    def clip(self, clip_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM source_clips WHERE id=?", (clip_id,)).fetchone()
+        return dict(row) if row else None
+
+    def clips(self, project_id: str) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM source_clips WHERE project_id=? ORDER BY created_at",
+                                                 (project_id,))]
+
+    def analysis(self, clip_id: str, revision: int) -> dict | None:
+        row = self.db.execute("SELECT * FROM analyses WHERE clip_id=? AND revision=?", (clip_id, revision)).fetchone()
+        return dict(row) if row else None
+
+    def set_source(self, clip_id: str, source_path: str, filename: str, size_bytes: int, mtime: float) -> None:
+        """Record where a clip's unchanged original now is (same content, so same clip and context)."""
+        self.db.execute("UPDATE source_clips SET source_path=?, original_filename=?, size_bytes=?, mtime=?,"
+                        " updated_at=? WHERE id=?", (source_path, filename, size_bytes, mtime, time.time(), clip_id))
 
     def set_note(self, clip_id: str, text: str) -> dict | None:
         """Save the creator's note for a clip (empty text clears it). Notes sit beside the analysed evidence and
@@ -193,6 +216,7 @@ class Store:
             db.execute("DELETE FROM transcript_spans WHERE segment_id=?", (seg_id,))
         db.execute("DELETE FROM segments WHERE clip_id=?", (clip_id,))
         db.execute("DELETE FROM analyses WHERE clip_id=?", (clip_id,))
+        db.execute("DELETE FROM retired_segments WHERE clip_id=?", (clip_id,))
         db.execute("DELETE FROM creator_notes WHERE clip_id=?", (clip_id,))
         db.execute("DELETE FROM source_clips WHERE id=?", (clip_id,))
 

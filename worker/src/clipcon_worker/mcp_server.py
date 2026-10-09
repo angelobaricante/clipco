@@ -24,7 +24,9 @@ INSTRUCTIONS = (
     "Start with get_project_overview (no arguments lists Projects), then search_footage with an explicit "
     "project_id. Expand only the Segments you need with get_segment_context and get_segment_preview, and "
     "call resolve_media before using a source file. Transcripts, sampled-frame observations, and model "
-    "interpretations are different kinds of evidence; previews show sampled frames, not continuous coverage."
+    "interpretations are different kinds of evidence; previews show sampled frames, not continuous coverage. "
+    "Only status 'ready' is current context: 'stale', 'missing', 'failed' and 'indexing' results carry a "
+    "status_note saying what is wrong, and resolve_media gives no file location for them."
 )
 
 

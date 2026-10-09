@@ -63,6 +63,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", required=True)
     p.add_argument("--excluded", required=True, choices=["yes", "no"])
     p.add_argument("clip_ids", nargs="+")
+    p = sub.add_parser("check-sources", help="re-verify originals: mark missing, changed (stale) or restored clips")
+    p.add_argument("--project", required=True)
+    p = sub.add_parser("retry", help="re-analyse chosen clips from their originals, keeping their IDs and notes")
+    p.add_argument("--project", required=True)
+    p.add_argument("clip_ids", nargs="+")
+    p = sub.add_parser("relink", help="point a clip at the same original file in a new location")
+    p.add_argument("--project", required=True)
+    p.add_argument("--clip", required=True)
+    p.add_argument("source", type=Path)
     p = sub.add_parser("snapshot")
     p.add_argument("--project", required=True)
     p = sub.add_parser("search", help="search the saved index (reads only; starts no model)")
@@ -105,6 +114,14 @@ def main(argv: list[str] | None = None) -> int:
                 emit("result", excluded=args.excluded == "yes", clip_ids=args.clip_ids)
             elif args.command == "snapshot":
                 emit("result", snapshot=worker.snapshot(args.project))
+            elif args.command in ("check-sources", "retry"):
+                started = time.monotonic()
+                progress = lambda stage, detail: emit("progress", stage=stage, **detail)
+                outcome = (worker.check_sources(args.project, progress) if args.command == "check-sources"
+                           else worker.retry(args.project, args.clip_ids, progress))
+                emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))
+            elif args.command == "relink":
+                emit("result", **worker.relink(args.project, args.clip, args.source))
             elif args.command in ("import", "import-sources"):
                 started = time.monotonic()
                 run = worker.import_clip if args.command == "import" else worker.import_sources

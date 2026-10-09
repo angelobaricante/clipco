@@ -231,7 +231,7 @@ def test_media_resolution_validates_ranges_and_refuses_missing_or_changed_source
     with clip.open("ab") as f:  # the creator re-exported or edited the file in place
         f.write(b"\0" * 64)
     changed = payload(call(home, ("resolve_media", {"segment_id": sid}))[0])
-    assert changed["available"] is False and changed["state"] == "changed"
+    assert changed["available"] is False and changed["state"] == "stale" and changed["index_status"] == "stale"
     assert "path" not in changed and "file_url" not in changed
 
     clip.rename(clip.with_name("moved.mp4"))

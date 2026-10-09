@@ -40,6 +40,38 @@ WEIGHTS = {"transcript": 3.0, "creator_note": 3.0, "label": 2.0, "interpretation
 SUPPORTING_WEIGHT = 0.25
 
 
+# What each non-ready status means for an agent holding that clip's saved context.
+STATUS_NOTES = {
+    "pending": "Not analysed yet; no context is saved for it.",
+    "indexing": "Being analysed now. Any context shown is from its previous analysis and may be replaced.",
+    "failed": "Its last analysis failed. Any context shown is from an earlier analysis and is not current; "
+              "the creator can retry it in Clipcon.",
+    "stale": "Its original or the analysis settings changed since it was indexed. This saved context may not "
+             "describe the footage; do not rely on it until the creator re-analyses the clip.",
+    "missing": "Its original file is not at the indexed location. The saved context describes it, but there is "
+               "no media to use until the creator restores or locates the file.",
+}
+
+
+def live_status(clip) -> str:
+    """The clip's stored status, except that a 'ready' clip whose original is gone or no longer matches the
+    indexed size/modification time is reported as missing or stale (checked now, without hashing)."""
+    if clip["status"] != "ready":
+        return clip["status"]
+    try:
+        stat = Path(clip["source_path"]).stat()
+    except OSError:
+        return "missing"
+    if stat.st_size != clip["size_bytes"] or abs(stat.st_mtime - clip["mtime"]) > 1e-3:
+        return "stale"
+    return "ready"
+
+
+def status_fields(clip) -> dict:
+    status = live_status(clip)
+    return {"status": status, **({"status_note": STATUS_NOTES[status]} if status != "ready" else {})}
+
+
 class RetrievalError(Exception):
     """A request the index cannot answer truthfully; reported to the agent as a tool error."""
 
@@ -98,13 +130,14 @@ class Index:
             clips = db.execute(
                 "SELECT c.*, (SELECT COUNT(*) FROM segments s WHERE s.clip_id = c.id) AS segment_count"
                 " FROM source_clips c WHERE c.project_id=? ORDER BY c.created_at", (project_id,)).fetchall()
+        statuses = {c["id"]: status_fields(c) for c in clips}
         return {
             "project": {"project_id": project["id"], "name": project["name"], "context": project["context"]},
-            "status_counts": dict(Counter(c["status"] for c in clips)),
+            "status_counts": dict(Counter(statuses[c["id"]]["status"] for c in clips)),
             "excluded_count": sum(1 for c in clips if c["excluded"]),
             "clips": [{
                 "clip_id": c["id"], "original_filename": c["original_filename"], "label": c["label"],
-                "role": c["role"], "status": c["status"], "stage": c["stage"], "error": c["error"],
+                "role": c["role"], **statuses[c["id"]], "stage": c["stage"], "error": c["error"],
                 "duration": c["duration"],
                 "speech_language": c["speech_language"], "segment_count": c["segment_count"],
                 "revision": c["revision"], "excluded": bool(c["excluded"]),
@@ -118,6 +151,16 @@ class Index:
             " c.size_bytes, c.mtime, c.speech_language, c.excluded FROM segments s JOIN source_clips c ON c.id = s.clip_id"
             " WHERE s.id=?", (segment_id,)).fetchone()
         if row is None:
+            try:
+                retired = db.execute("SELECT r.revision, c.id, c.original_filename FROM retired_segments r"
+                                     " JOIN source_clips c ON c.id = r.clip_id WHERE r.id=?", (segment_id,)).fetchone()
+            except sqlite3.OperationalError:  # an index saved before Segments were retired
+                retired = None
+            if retired:
+                raise RetrievalError(
+                    f"segment_id {segment_id!r} was from revision {retired[0]} of {retired[2]} (clip_id {retired[1]}),"
+                    " which has since been re-analysed; its context is no longer current. Search again for that"
+                    " clip's current Segments.")
             raise RetrievalError(f"unknown segment_id {segment_id!r}; use a segment_id returned by search_footage")
         return row
 
@@ -200,7 +243,7 @@ class Index:
             spans = sorted(keep, key=lambda t: t["start"])
         return {
             "segment": self._reference(seg),
-            "status": seg["status"], "revision": seg["revision"],
+            **status_fields(seg), "revision": seg["revision"],
             "transcript": [{"transcript_id": t["id"], "start": t["start"], "end": t["end_"], "text": t["text"],
                             "in_segment": bool(t["in_segment"])} for t in spans],
             "transcript_window_seconds": window, "transcript_lines_omitted": omitted,
@@ -251,7 +294,7 @@ class Index:
         if width is None or width > PREVIEW_WIDTH_MAX:
             raise RetrievalError(f"sampled frame {frame['id']} is not a JPEG at most {PREVIEW_WIDTH_MAX} px wide")
         return {
-            "segment": self._reference(seg), "status": seg["status"], "revision": seg["revision"],
+            "segment": self._reference(seg), **status_fields(seg), "revision": seg["revision"],
             "frame": {"frame_id": frame["id"], "time": frame["time"], "width": width, "height": height,
                       "bytes": len(data), "mime_type": "image/jpeg"},
             "sampled_frame_ids": [f["id"] for f in frames],
@@ -272,22 +315,14 @@ class Index:
         if not (0 <= start < end <= duration + 1e-6):
             raise RetrievalError(f"range {start}–{end}s is invalid for {seg['original_filename']}; "
                                  f"need 0 <= start < end <= duration ({duration}s)")
+        status = live_status(seg)  # the same answer overview and search give for this clip
         out = {**self._reference(seg), "start": start, "end": min(end, duration), "duration": duration,
-               "index_status": seg["status"], "revision": seg["revision"]}
-        if seg["status"] != "ready":
-            return {**out, "available": False, "state": seg["status"],
-                    "detail": f"Clipcon marks this clip {seg['status']}; its saved context is not current. "
+               "index_status": status, "revision": seg["revision"]}
+        if status != "ready":
+            return {**out, "available": False, "state": status,
+                    "detail": f"Clipcon marks this clip {status}. {STATUS_NOTES[status]} "
                               "Ask the creator to resolve it in Clipcon."}
         path = Path(seg["source_path"])
-        try:
-            stat = path.stat()
-        except OSError:
-            return {**out, "available": False, "state": "missing",
-                    "detail": "The original file is not at its indexed location. Ask the creator to restore it."}
-        if stat.st_size != seg["size_bytes"] or abs(stat.st_mtime - seg["mtime"]) > 1e-3:
-            return {**out, "available": False, "state": "changed",
-                    "detail": "The file changed since it was indexed; its saved context may be stale. "
-                              "Ask the creator to re-analyse it in Clipcon."}
         return {**out, "available": True, "state": "available", "path": str(path), "file_url": path.as_uri(),
                 "note": "A locator only: it grants no new filesystem permission. Read the file with your own "
                         "tools under their normal access to this Mac."}
@@ -301,7 +336,8 @@ class Index:
         with self._connect() as db:
             self._project(db, project_id)
             segments = db.execute(
-                "SELECT s.*, c.original_filename, c.status, c.revision, c.project_id, c.excluded, n.text AS note"
+                "SELECT s.*, c.original_filename, c.status, c.revision, c.project_id, c.excluded, c.source_path,"
+                " c.size_bytes, c.mtime, n.text AS note"
                 " FROM segments s"
                 " JOIN source_clips c ON c.id = s.clip_id LEFT JOIN creator_notes n ON n.clip_id = c.id"
                 " WHERE c.project_id=? AND (? OR NOT c.excluded)"
@@ -318,6 +354,7 @@ class Index:
                 evidence[seg["id"]] = items
             ranked = rank(query, segments, evidence)
             page = ranked[offset:offset + limit]
+            statuses = {seg["clip_id"]: status_fields(seg) for _, seg, _ in page}
             related = {seg["id"]: self._relationships(db, seg["id"], RELATIONSHIPS_PER_RESULT, full=False,
                                                       include_excluded=include_excluded)
                        for _, seg, _ in page}
@@ -327,7 +364,7 @@ class Index:
             "offset": offset, "truncated": more, "next_offset": offset + limit if more else None,
             "results": [{
                 **self._reference(seg), "excerpt": clip_text(text), "evidence_basis": kind,
-                "status": seg["status"], "revision": seg["revision"], "score": round(score, 2),
+                **statuses[seg["clip_id"]], "revision": seg["revision"], "score": round(score, 2),
                 "excluded": bool(seg["excluded"]), "has_creator_note": bool(seg["note"]),
                 "relationships": related[seg["id"]],
             } for score, seg, (_, kind, text) in page],

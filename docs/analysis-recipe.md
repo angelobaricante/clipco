@@ -13,7 +13,7 @@ Clipcon reuses saved footage context when a Source clip and the analysis configu
 | `speech` | whisper.cpp model filename and byte size, language setting, prompt, context limit, VAD model | `WhisperCppSpeech.identity` |
 | `vision` | Ollama model tag and installed digest | `OllamaVision.identity` |
 
-A ready clip whose size and modification time match the indexed values keeps its saved fingerprint instead of being rehashed. `resolve_media` uses the same check to detect changed media. The clip stays `ready` throughout the check. If any input differs, the clip keeps its identity (`clip_id`) and is re-analysed into a new revision. The new revision publishes atomically, replacing the old Segments in one transaction.
+A ready clip whose size and modification time match the indexed values keeps its saved fingerprint instead of being rehashed. MCP applies the same check live on every read, so a moved or edited original is reported `missing` or `stale` and gets no locator before Clipcon re-checks. Checking sources (when a Project opens, or **Clip ▸ Check Original Files**) hashes only originals whose size or modification time differ. Identical content makes the clip `ready` again. Different content, or a different recipe or model, marks it `stale` until it is re-analysed. A re-analysis of a failed, stale or missing clip reuses its saved context without inference when the content and settings still match. If any input differs, the clip keeps its identity (`clip_id`) and is re-analysed into a new revision. The new revision publishes atomically, replacing the old Segments in one transaction.
 
 Relationships (Spoken correction, Repeated take, suggested supporting B-roll) are derived in code from the published Segments (`relationships.py`). They are recomputed inside every publish transaction. When the rules' `VERSION` changes, the store recomputes them for every Project the next time it opens. No model is involved, so re-deriving them never re-runs inference.
 
@@ -28,4 +28,4 @@ The recipe that passes the three discovery queries on the agreed tutorial corpus
 
 ## Known limitation
 
-Computing `vision` asks the local Ollama service for the installed digest. Ollama is not asked to load the model. If Ollama is not running, the digest is empty, so the key no longer matches and re-importing would attempt re-analysis. Saved context and search are unaffected because retrieval never computes the key. Recovery behavior is #6.
+Computing `vision` asks the local Ollama service for the installed digest. Ollama is not asked to load the model. If Ollama is not running, the digest is empty, and a model with the same name is treated as unchanged rather than stale. A changed recipe or model is detected when Clipcon checks sources, not live through MCP: until the app re-checks, MCP still reports those clips `ready`.

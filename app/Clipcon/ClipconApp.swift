@@ -50,6 +50,12 @@ struct ClipconApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(targets.isEmpty)
+                Divider()
+                Button("Re-analyse") { Task { await model.retry(targets) } }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(!model.canRetry(targets))
+                Button("Check Original Files") { Task { await model.checkSources() } }
+                    .disabled(model.project == nil || model.activity != nil || model.isCheckingSources)
             }
         }
     }
