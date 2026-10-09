@@ -48,9 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("import")
     p.add_argument("--project", required=True)
     p.add_argument("source", type=Path)
-    p = sub.add_parser("import-folder")
+    p = sub.add_parser("import-sources", help="import chosen video files and folders into one Project")
     p.add_argument("--project", required=True)
-    p.add_argument("source", type=Path, metavar="folder")
+    p.add_argument("source", type=Path, nargs="+", metavar="file-or-folder")
     p = sub.add_parser("remove-clips", help="forget clips' saved context (original files are not touched)")
     p.add_argument("--project", required=True)
     p.add_argument("clip_ids", nargs="+")
@@ -91,9 +91,9 @@ def main(argv: list[str] | None = None) -> int:
                 emit("result", deleted=args.project)
             elif args.command == "snapshot":
                 emit("result", snapshot=worker.snapshot(args.project))
-            elif args.command in ("import", "import-folder"):
+            elif args.command in ("import", "import-sources"):
                 started = time.monotonic()
-                run = worker.import_clip if args.command == "import" else worker.import_folder
+                run = worker.import_clip if args.command == "import" else worker.import_sources
                 outcome = run(args.project, args.source,
                               progress=lambda stage, detail: emit("progress", stage=stage, **detail))
                 emit("result", **outcome, elapsed=round(time.monotonic() - started, 2))

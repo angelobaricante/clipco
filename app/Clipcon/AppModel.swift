@@ -213,12 +213,14 @@ final class AppModel {
         }
     }
 
-    /// Creates a Project when needed, then indexes one Source clip, or every video in a folder, while the
-    /// UI stays interactive. Completed clips are reviewable while the rest are still being analysed.
-    func importClip(_ url: URL, newProjectName: String?, context: String) async {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        activity = ImportActivity(filename: url.lastPathComponent, stage: "Starting")
+    /// Creates a Project when needed, then indexes the chosen Source clips and every video in chosen folders,
+    /// while the UI stays interactive. Completed clips are reviewable while the rest are still being analysed.
+    func importFootage(_ urls: [URL], newProjectName: String?, context: String) async {
+        guard let first = urls.first else { return }
+        let accessed = urls.filter { $0.startAccessingSecurityScopedResource() }
+        defer { accessed.forEach { $0.stopAccessingSecurityScopedResource() } }
+        activity = ImportActivity(filename: urls.count == 1 ? first.lastPathComponent : "\(urls.count) items",
+                                  stage: "Starting")
         defer { activity = nil }
         do {
             if readiness?.state == .cold {
@@ -235,17 +237,17 @@ final class AppModel {
                 try await open(created)
             }
             guard let project else { return }
-            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            let isFolder = (try? first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
                 await MainActor.run { self?.track(event) }
             }
-            if isFolder {
-                _ = try await worker.importFolder(projectID: project.id, folder: url, onProgress: onProgress)
-                try await reload()
-            } else {
-                let result = try await worker.importClip(projectID: project.id, source: url, onProgress: onProgress)
+            if urls.count == 1 && !isFolder {
+                let result = try await worker.importClip(projectID: project.id, source: first, onProgress: onProgress)
                 try await reload()
                 select(result.clipId)
+            } else {
+                _ = try await worker.importSources(projectID: project.id, sources: urls, onProgress: onProgress)
+                try await reload()
             }
             if !trimmedQuery.isEmpty { await search() }
         } catch {

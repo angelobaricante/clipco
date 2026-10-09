@@ -182,19 +182,27 @@ class Worker:
             raise
 
     def import_folder(self, project_id: str, folder: Path, progress: Progress | None = None) -> dict:
-        """Register every video file in a folder (and its subfolders, skipping hidden ones) as pending, then index
-        each one. A clip that fails stays failed while the others continue; if the local model service is
-        unavailable, the import stops with that error and the remaining clips stay pending."""
+        return self.import_sources(project_id, [folder], progress)
+
+    def import_sources(self, project_id: str, paths: list[Path], progress: Progress | None = None) -> dict:
+        """Register every chosen video file, and every video in chosen folders (and their subfolders, skipping
+        hidden ones), as pending, then index each one. A clip that fails stays failed while the others continue;
+        if the local model service is unavailable, the import stops with that error and the rest stay pending."""
         report = progress or (lambda stage, detail: None)
-        folder = Path(folder).expanduser().resolve()
         if self.store.project(project_id) is None:
             raise ValueError(f"unknown project {project_id}")
-        # Clips are identified by their resolved original path, as import_clip does, so a linked file is one clip.
-        sources = sorted({p.resolve() for p in folder.rglob("*")
-                          if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES
-                          and not any(part.startswith(".") for part in p.relative_to(folder).parts)})
+        found: set[Path] = set()
+        for path in (Path(p).expanduser().resolve() for p in paths):
+            if path.is_dir():
+                found |= {p for p in path.rglob("*")
+                          if not any(part.startswith(".") for part in p.relative_to(path).parts)}
+            else:
+                found.add(path)
+        # Clips are identified by their resolved original path, as import_clip does, so a linked or twice-chosen
+        # file is one clip.
+        sources = sorted({p.resolve() for p in found if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES})
         if not sources:
-            raise ValueError(f"no video files in {folder}")
+            raise ValueError("no video files in the chosen items")
         for source in sources:
             if not self.store.clip_by_path(project_id, str(source)):
                 clip_id = new_id("clp")

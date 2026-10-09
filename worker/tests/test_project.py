@@ -354,3 +354,23 @@ def test_deleting_a_project_leaves_other_projects_and_all_originals(home, tmp_pa
     assert gone.is_error
     assert all(p.exists() for p in footage)
     assert not any((home / "frames").iterdir())
+
+
+def test_several_chosen_clips_and_folders_join_one_project_once_each(home, tmp_path):
+    shoot = corpus(tmp_path / "shoot")
+    extra = tmp_path / "pickups"
+    extra.mkdir()
+    make_clip(extra / "broll-4-glass.mp4", seconds=6.0, audio=False)
+    worker = Worker(home, speech=ScriptedSpeech(A_ROLL), vision=ScriptedVision(B_ROLL))
+    project = worker.create_project("Gravity filter tutorial")
+
+    # Two clips picked individually, one of them also inside a chosen folder, plus a non-video file.
+    outcome = worker.import_sources(project["id"], [shoot / "a-roll.mp4", shoot / "broll-1-pour.mp4", extra,
+                                                    shoot / "notes.txt"])
+
+    clips = payload(call(home, ("get_project_overview", {"project_id": project["id"]}))[0])["clips"]
+    assert sorted(c["original_filename"] for c in clips) == ["a-roll.mp4", "broll-1-pour.mp4", "broll-4-glass.mp4"]
+    assert all(c["status"] == "ready" for c in clips) and len(outcome["clips"]) == 3
+
+    again = worker.import_sources(project["id"], [extra, extra / "broll-4-glass.mp4"])
+    assert [c["original_filename"] for c in again["clips"]] == ["broll-4-glass.mp4"]

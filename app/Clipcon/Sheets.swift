@@ -7,8 +7,16 @@ struct ImportSheet: View {
     @State private var addToCurrent = true
     @State private var name = ""
     @State private var context = ""
-    @State private var source: URL?
+    @State private var sources: [URL] = []
     @State private var choosing = false
+
+    private var chosenSummary: String {
+        switch sources.count {
+        case 0: "No clips or folders chosen"
+        case 1: sources[0].lastPathComponent
+        default: "\(sources.count) items chosen"
+        }
+    }
 
     private var creatingProject: Bool { model.project == nil || !addToCurrent }
 
@@ -31,11 +39,17 @@ struct ImportSheet: View {
                 }
             }
             Section("Footage") {
-                LabeledContent(source?.lastPathComponent ?? "No folder or clip chosen") {
+                LabeledContent(chosenSummary) {
                     Button("Choose…") { choosing = true }
                 }
-                Text("Choose a folder to import every video in it, or a single clip. Originals are only read. "
-                     + "Analysis runs locally with whisper.cpp and Ollama.")
+                if sources.count > 1 {
+                    ForEach(sources, id: \.self) { url in
+                        Label(url.lastPathComponent, systemImage: url.hasDirectoryPath ? "folder" : "film")
+                            .font(.callout).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Text("Choose clips and folders — ⌘-click or ⇧-click to choose several. Every video inside a chosen "
+                     + "folder is imported. Originals are only read. Analysis runs locally with whisper.cpp and Ollama.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let r = model.readiness, !model.canAnalyze {
@@ -47,20 +61,21 @@ struct ImportSheet: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie]) { result in
-            if case .success(let url) = result { source = url }
+        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .movie], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { sources = urls }
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Analyze") {
-                    guard let source else { return }
+                    guard !sources.isEmpty else { return }
                     let projectName = creatingProject ? name.trimmingCharacters(in: .whitespaces) : nil
                     let context = context
                     dismiss()
-                    Task { await model.importClip(source, newProjectName: projectName, context: context) }
+                    let chosen = sources
+                    Task { await model.importFootage(chosen, newProjectName: projectName, context: context) }
                 }
-                .disabled(source == nil || (creatingProject && name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(sources.isEmpty || (creatingProject && name.trimmingCharacters(in: .whitespaces).isEmpty)
                           || !model.canAnalyze || model.activity != nil)
             }
         }

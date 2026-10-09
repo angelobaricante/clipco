@@ -92,7 +92,7 @@ enum AutomationRun {
                                 ?? []]
         }
 
-        await model.importClip(URL(filePath: path),
+        await model.importFootage([URL(filePath: path)],
                                newProjectName: defaults.string(forKey: "ClipconAutomationProject"),
                                context: defaults.string(forKey: "ClipconAutomationContext") ?? "")
         report["import_seconds"] = Date().timeIntervalSince(started)

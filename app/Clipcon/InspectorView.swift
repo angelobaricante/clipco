@@ -60,7 +60,7 @@ struct StatusBanner: View {
                 Text(clip.error ?? "Unknown error").font(.callout).textSelection(.enabled)
                 Button("Retry Analysis") {
                     Task {
-                        await model.importClip(URL(filePath: clip.sourcePath), newProjectName: nil,
+                        await model.importFootage([URL(filePath: clip.sourcePath)], newProjectName: nil,
                                                context: model.project?.context ?? "")
                     }
                 }

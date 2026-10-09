@@ -151,9 +151,10 @@ struct WorkerClient: Sendable {
         _ = try await run(["delete-project", "--project", projectID])
     }
 
-    func importFolder(projectID: String, folder: URL,
-                      onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
-        try await run(["import-folder", "--project", projectID, folder.path], onEvent: onProgress)
+    /// Imports chosen video files and every video inside chosen folders into one Project.
+    func importSources(projectID: String, sources: [URL],
+                       onProgress: @escaping @Sendable (WorkerEvent) async -> Void) async throws -> WorkerEvent {
+        try await run(["import-sources", "--project", projectID] + sources.map(\.path), onEvent: onProgress)
     }
 
     func importClip(projectID: String, source: URL,
