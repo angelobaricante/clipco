@@ -281,14 +281,19 @@ struct AgentConnectionSheet: View {
     @Environment(\.dismiss) private var dismiss
     let agent: EditingAgent
     @State private var claudeClient = "claude-desktop"
+    @State private var confirmingDisconnect = false
 
     private var clientID: String { agent == .codex ? "codex" : claudeClient }
     private var registration: AgentRegistration? { model.mcpStatus?.agents?.first { $0.id == clientID } }
     private var busy: Bool { model.isCheckingMcp || model.connectingClient != nil }
+    private var restartGuidance: String {
+        clientID == "claude-desktop" ? "Quit and reopen Claude Desktop to apply changes."
+            : "Start a new agent session to apply changes."
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Connect \(agent.rawValue)").font(.title2.weight(.semibold))
+            Text("\(agent.rawValue) Connection").font(.title2.weight(.semibold))
             Text("Let your agent find footage, read its context, and locate the original clips.")
                 .foregroundStyle(.secondary)
             if agent == .claude {
@@ -303,7 +308,7 @@ struct AgentConnectionSheet: View {
                       systemImage: registration.configured ? "checkmark.circle" : "link")
                     .foregroundStyle(registration.configured ? Color.green : Color.secondary)
                 if registration.state == "conflict" {
-                    Text("This app already has a different or disabled Clipco connection. Review its settings to keep the intended connection.")
+                    Text("This app has a different or disabled Clipco connection. Disconnect it here, then connect again to use this Clipco workspace.")
                         .font(.callout)
                 }
                 if !registration.installed {
@@ -311,6 +316,8 @@ struct AgentConnectionSheet: View {
                 }
                 if let error = registration.error { Text(error).font(.callout).foregroundStyle(.orange) }
                 if registration.configured { Text(registration.guidance).font(.callout) }
+                Text("Disconnect removes Clipco’s saved registration. \(restartGuidance)")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if let status = model.mcpStatus {
                 Label(status.ok ? "Footage tools ready" : "Footage tools unavailable",
@@ -347,17 +354,35 @@ struct AgentConnectionSheet: View {
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-                Button("Connect \(registration?.name ?? agent.rawValue)") {
-                    Task { await model.connectAgent(clientID) }
+                if registration?.configured == true || registration?.state == "conflict" {
+                    Button(registration?.configured == true ? "Disconnect" : "Disconnect Existing Connection", role: .destructive) {
+                        if registration?.state == "conflict" {
+                            confirmingDisconnect = true
+                        } else {
+                            Task { await model.connectAgent(clientID, disconnect: true) }
+                        }
+                    }
+                    .disabled(busy)
+                } else {
+                    Button("Connect \(registration?.name ?? agent.rawValue)") {
+                        Task { await model.connectAgent(clientID) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || registration?.installed != true || registration?.error != nil
+                              || model.mcpStatus?.ok != true)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(busy || registration?.installed != true || registration?.configured == true
-                          || registration?.state == "conflict" || registration?.error != nil
-                          || model.mcpStatus?.ok != true)
             }
         }
         .padding(24).frame(width: 520)
         .interactiveDismissDisabled(busy)
+        .alert("Disconnect the existing Clipco connection?", isPresented: $confirmingDisconnect) {
+            Button("Disconnect", role: .destructive) {
+                Task { await model.connectAgent(clientID, disconnect: true) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes only the Clipco registration from \(registration?.name ?? agent.rawValue). You can then connect this workspace. \(restartGuidance)")
+        }
         .task {
             model.agentConnectionError = nil
             await model.checkMcp()

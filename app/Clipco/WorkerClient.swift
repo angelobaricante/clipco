@@ -177,8 +177,8 @@ struct WorkerClient: Sendable {
         return s
     }
 
-    func connectAgent(_ client: String) async throws -> McpStatus {
-        guard let status = try await run(["connect-agent", "--client", client]).mcp else {
+    func connectAgent(_ client: String, disconnect: Bool = false) async throws -> McpStatus {
+        guard let status = try await run([disconnect ? "disconnect-agent" : "connect-agent", "--client", client]).mcp else {
             throw WorkerError.noResult
         }
         return status

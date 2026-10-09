@@ -91,8 +91,8 @@ def statuses(command: list[str], codex: dict) -> list[dict]:
     return [client_status(client, command, codex if client == "codex" else None) for client in CLIENTS]
 
 
-def merge_registration(path: Path, entry: dict) -> None:
-    """Add only our named entry, preserving unrelated settings and refusing conflicts/invalid JSON."""
+def merge_registration(path: Path, entry: dict | None) -> None:
+    """Add or remove only our named entry, preserving unrelated settings and refusing invalid JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(path.name + ".clipco-lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -100,11 +100,16 @@ def merge_registration(path: Path, entry: dict) -> None:
             raise ValueError("Agent configuration is a symbolic link. Use manual setup in the agent.")
         raw, config = read_config(path)
         servers = config.setdefault("mcpServers", {})
-        if "clipco" in servers:
+        if entry is None:
+            if "clipco" not in servers:
+                return
+            del servers["clipco"]
+        elif "clipco" in servers:
             if servers["clipco"] == entry:
                 return
             raise ValueError("A different Clipco registration already exists. Review it in the agent before connecting.")
-        servers["clipco"] = entry
+        if entry is not None:
+            servers["clipco"] = entry
         encoded = (json.dumps(config, indent=2, ensure_ascii=False) + "\n").encode()
         fd, temporary = tempfile.mkstemp(prefix=".clipco-", dir=path.parent)
         try:
@@ -150,3 +155,21 @@ def connect(client: str, command: list[str]) -> None:
         merge_registration(claude_config(client), entry)
     if not client_status(client, command)["configured"]:
         raise ValueError("The registration could not be verified. Check the agent's settings.")
+
+
+def disconnect(client: str, command: list[str]) -> None:
+    """Remove only the named Clipco registration, including disabled/stale registrations."""
+    state = client_status(client, command)
+    if state["error"]:
+        raise ValueError(state["error"])
+    if state["state"] not in ("configured", "conflict"):
+        return
+    if client == "codex":
+        result = subprocess.run([str(find_codex()), "mcp", "remove", "clipco"],
+                                capture_output=True, text=True, timeout=20)
+        if result.returncode:
+            raise ValueError("Codex could not remove Clipco's registration. Check its settings.")
+    else:
+        merge_registration(claude_config(client), None)
+    if client_status(client, command)["state"] in ("configured", "conflict"):
+        raise ValueError("The connection is still registered. Check the agent's settings.")

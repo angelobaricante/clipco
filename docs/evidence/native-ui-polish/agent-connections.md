@@ -20,3 +20,14 @@ No creator agent registrations were changed; only scratch registrations under /p
 Limits: no new Codex registration was written with the real CLI (its argument boundary used an isolated adapter); existing registration was read. Claude Desktop configuration plus the actual local MCP helper handshake are verified, but a restarted Desktop chat consuming the tools is not demonstrated. No live provider chat or model-quality claim, full VoiceOver pass, light-mode pass or under-load frame-time profile.
 
 Sources: installed Codex/Claude CLI help; https://code.claude.com/docs/en/mcp ; https://modelcontextprotocol.io/docs/develop/connect-local-servers .
+
+
+## Connection action follow-up
+
+Creator screenshots exposed two dead-end actions: Configured Claude retained a disabled Connect button, and conflicting Codex offered no in-app recovery. Configured clients now show Disconnect. Conflicting clients show Disconnect Existing Connection with a native confirmation; removal exposes an enabled Connect action when the client and footage tools are ready. The sheet is titled Connection rather than Connect in every state. Guidance reflects the selected client.
+
+Disconnect removes only the named clipco registration, preserves unrelated settings, and works without a healthy footage index. Claude changes retain the existing atomic write, lock, and private backup behavior; Codex uses its installed CLI mcp remove command. Disconnect never promises to revoke already-running sessions or previously retrieved context; restart/new-session guidance is shown.
+
+Native scratch UI: both Claude Desktop and Code disconnected and reconnected, changing Configured → Not configured/Connect → Configured/Disconnect. Codex conflict action and Cancel were verified; the creator's real registration was not removed. Native layout inspected. Worker connection checks cover all three clients, stale/disabled removal and reconnect, unrelated setting preservation, idempotent removal, and removal with unavailable footage tools. No provider chat, inference or source changes.
+
+Final follow-up validation: native Debug BUILD SUCCEEDED; `.venv/bin/python -m pytest tests/test_agent_connections.py -q`: 19 passed in 44.63s. `git diff --check` passed.

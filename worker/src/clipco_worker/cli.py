@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp-status")
     p = sub.add_parser("connect-agent", help="register Clipco with a local editing agent")
     p.add_argument("--client", choices=["codex", "claude-code", "claude-desktop"], required=True)
+    p = sub.add_parser("disconnect-agent", help="remove only Clipco from a local editing agent")
+    p.add_argument("--client", choices=["codex", "claude-code", "claude-desktop"], required=True)
     p = sub.add_parser("create-project")
     p.add_argument("--name", required=True)
     p.add_argument("--context", default="")
@@ -170,13 +172,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "mcp-status":
             from .mcp_check import connection_status
             emit("result", mcp=connection_status(args.home))
-        elif args.command == "connect-agent":
+        elif args.command in ("connect-agent", "disconnect-agent"):
             from .mcp_check import connection_status
-            from .agent_connections import connect
+            from .agent_connections import connect, disconnect
             status = connection_status(args.home)
-            if not status["ok"]:
+            if args.command == "connect-agent" and not status["ok"]:
                 raise ValueError("Clipco's footage tools are unavailable. Check local setup before connecting.")
-            connect(args.client, status["server_command"])
+            action = connect if args.command == "connect-agent" else disconnect
+            action(args.client, status["server_command"])
             emit("result", mcp=connection_status(args.home))
         elif args.command == "search":
             emit("result", search=Index(args.home).search(args.project, args.query, args.limit, args.offset,

@@ -252,13 +252,13 @@ final class AppModel {
         }
     }
 
-    func connectAgent(_ client: String) async {
+    func connectAgent(_ client: String, disconnect: Bool = false) async {
         guard connectingClient == nil, !isCheckingMcp else { return }
         connectingClient = client
         agentConnectionError = nil
         defer { connectingClient = nil }
         do {
-            mcpStatus = try await worker.connectAgent(client)
+            mcpStatus = try await worker.connectAgent(client, disconnect: disconnect)
         } catch {
             agentConnectionError = error.localizedDescription
         }

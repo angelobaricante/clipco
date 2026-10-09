@@ -28,6 +28,9 @@ elif a[:3] == ["mcp", "get", "clipco"]:
 elif a[:4] == ["mcp", "add", "clipco", "--"]:
     c["clipco"] = {"enabled": True, "transport": {"command": a[4], "args": a[5:]}}
     p.write_text(json.dumps(c))
+elif a == ["mcp", "remove", "clipco"]:
+    c.pop("clipco", None)
+    p.write_text(json.dumps(c))
 else:
     sys.exit(2)
 ''')
@@ -142,3 +145,44 @@ def test_unavailable_footage_tools_do_not_write_agent_settings(agents):
     event = invoke(env, "connect-agent", "--client", "claude-desktop", succeeds=False)
     assert "footage tools are unavailable" in event["message"]
     assert config.read_bytes() == before
+
+
+@pytest.mark.parametrize("name,file", [("codex", "codex.json"), ("claude-code", ".claude.json"),
+                                      ("claude-desktop", "claude_desktop_config.json")])
+def test_disconnect_then_reconnect_preserves_other_settings(agents, name, file):
+    root, env = agents
+    path = root / file
+    other = {"command": "keep-me"}
+    config = {"other": other} if name == "codex" else {"preferences": {"keep": True}, "mcpServers": {"other": other}}
+    path.write_text(json.dumps(config))
+    invoke(env, "connect-agent", "--client", name)
+    event = invoke(env, "disconnect-agent", "--client", name)
+    assert client(event, name)["state"] == "not_configured"
+    assert json.loads(path.read_text()) == config
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    invoke(env, "disconnect-agent", "--client", name)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert client(invoke(env, "connect-agent", "--client", name), name)["configured"]
+
+@pytest.mark.parametrize("name,file", [("codex", "codex.json"), ("claude-code", ".claude.json"),
+                                      ("claude-desktop", "claude_desktop_config.json")])
+def test_stale_connection_can_be_removed_and_connected(agents, name, file):
+    root, env = agents
+    path = root / file
+    entry = {"command": "stale-helper", "disabled": True}
+    config = {"clipco": {"enabled": False, "transport": entry}, "other": {"keep": True}} if name == "codex" else {"mcpServers": {"clipco": entry, "other": {"keep": True}}}
+    path.write_text(json.dumps(config))
+    assert client(invoke(env, "mcp-status"), name)["state"] == "conflict"
+    invoke(env, "disconnect-agent", "--client", name)
+    assert client(invoke(env, "connect-agent", "--client", name), name)["configured"]
+    saved = json.loads(path.read_text())
+    assert (saved if name == "codex" else saved["mcpServers"])["other"] == {"keep": True}
+
+
+def test_disconnect_works_when_footage_tools_are_unavailable(agents):
+    root, env = agents
+    invoke(env, "connect-agent", "--client", "claude-desktop")
+    (root / "index" / "index.sqlite").write_bytes(b'broken')
+    event = invoke(env, "disconnect-agent", "--client", "claude-desktop")
+    assert not event["mcp"]["ok"]
+    assert not client(event, "claude-desktop")["configured"]
