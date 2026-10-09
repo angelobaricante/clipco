@@ -12,7 +12,7 @@ from pathlib import Path
 from . import media
 from .speech import TranscriptSpan
 from .store import Store
-from .vision import FrameItem, InferenceError, SegmentRequest, TranscriptItem, validate
+from .vision import FrameItem, InferenceError, SegmentRequest, ServiceUnavailable, TranscriptItem, validate
 
 # Bump when segmentation/sampling/prompting changes so cached analyses are invalidated.
 RECIPE = {
@@ -129,13 +129,25 @@ class Worker:
             )
             report("ready", {"clip_id": clip_id, "reused": False, "revision": revision})
             return {"clip_id": clip_id, "reused": False, "revision": revision}
-        except (media.MediaError, InferenceError, Exception) as e:
+        except Exception as e:
             self.store.set_status(clip_id, "failed", error=f"{type(e).__name__}: {e}")
             report("failed", {"clip_id": clip_id, "error": str(e)})
             raise
 
+    def _describe(self, request: SegmentRequest, attempts: int = 2):
+        """Ask the model for validated context, retrying once when its output fails validation."""
+        for attempt in range(attempts):
+            try:
+                return validate(self.vision.describe(request), request)
+            except ServiceUnavailable:
+                raise
+            except InferenceError:
+                if attempt == attempts - 1:
+                    raise
+
     def _analyse(self, clip_id: str, source: Path, stage: Callable) -> dict:
         recipe = self.recipe
+        project_context = self.store.project_context_for_clip(clip_id)
         stage("probing")
         info = media.probe(source)
         frames_dir = self.home / "frames" / clip_id / uuid.uuid4().hex[:8]
@@ -165,16 +177,14 @@ class Worker:
                 local = {f"t{i + 1}": t["id"] for i, t in enumerate(transcript)}
                 local |= {f"f{i + 1}": f["id"] for i, f in enumerate(frames)}
                 request = SegmentRequest(
-                    project_context=self.store.db.execute(
-                        "SELECT p.context FROM projects p JOIN source_clips c ON c.project_id=p.id WHERE c.id=?",
-                        (clip_id,)).fetchone()[0],
+                    project_context=project_context,
                     original_filename=source.name, start=start, end=end,
                     transcript=[TranscriptItem(f"t{i + 1}", t["start"], t["end"], t["text"])
                                 for i, t in enumerate(transcript)],
                     frames=[FrameItem(f"f{i + 1}", f["time"], Path(f["path"])) for i, f in enumerate(frames)],
                 )
                 stage("describing", segment=ordinal + 1, of=len(planned))
-                desc = validate(self.vision.describe(request), request)
+                desc = self._describe(request)
                 segments.append({
                     "id": new_id("seg"), "ordinal": ordinal, "start": start, "end": end, "label": desc.label,
                     "transcript": transcript, "frames": frames,

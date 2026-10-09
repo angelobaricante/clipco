@@ -85,3 +85,17 @@ def test_failed_warm_up_is_an_inference_failure(tmp_path):
                     which=tools_present, progress=lambda s: None)
     assert final["state"] == "inference_failed"
     assert "model runner crashed" in final["detail"]
+
+
+def test_non_loopback_or_cloud_inference_is_refused(tmp_path):
+    from clipcon_worker.vision import OllamaVision
+
+    whisper = tmp_path / "ggml-small.en.bin"
+    whisper.write_bytes(b"x")
+    remote = check(OllamaVision(MODEL, host="ollama.example.com:11434"), whisper, which=tools_present)
+    assert remote["state"] == "service_unavailable"
+    assert "loopback" in remote["detail"]
+
+    cloud = check(OllamaVision("gpt-oss:120b-cloud", host="127.0.0.1:1"), whisper, which=tools_present)
+    assert cloud["state"] == "service_unavailable"
+    assert "cloud" in cloud["detail"]

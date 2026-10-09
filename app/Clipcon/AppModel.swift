@@ -114,6 +114,10 @@ final class AppModel {
                 activity?.stage = "Loading model"
                 await warmUp()
             }
+            guard readiness?.state == .ready else {
+                errorMessage = readiness.map { "\($0.detail) \($0.guidance)" } ?? "Local models are not ready."
+                return
+            }
             if let name = newProjectName {
                 let created = try await worker.createProject(name: name, context: context)
                 projects.append(created)
@@ -135,6 +139,11 @@ final class AppModel {
             selection = result.clipId
         } catch {
             errorMessage = error.localizedDescription
+            if case WorkerError.failed(let kind, let message) = error,
+               kind == "InferenceError" || kind == "ServiceUnavailable" {
+                readiness = Readiness(state: kind == "ServiceUnavailable" ? .serviceUnavailable : .inferenceFailed,
+                                      detail: message, guidance: "Check the Ollama log, then retry the clip.")
+            }
             try? await reload()
         }
     }

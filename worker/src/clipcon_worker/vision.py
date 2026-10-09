@@ -128,7 +128,12 @@ def validate(raw: object, request: SegmentRequest) -> Description:
             rejected.append(str(ref))
     if request.frames and not kept_obs:
         raise InferenceError("model output has no observation for any supplied frame")
+    if not kept_evidence:
+        raise InferenceError("model interpretation cites no supplied evidence")
     return Description(label.strip(), kept_obs, interpretation.strip(), kept_evidence, rejected)
+
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class OllamaVision:
@@ -138,7 +143,16 @@ class OllamaVision:
         self.timeout = timeout
         self._digest: str | None = None
 
+    def _refuse_remote(self) -> None:
+        """Core inference must stay on this Mac: loopback host only, no Ollama cloud models."""
+        hostname = self.host.rsplit(":", 1)[0].strip("[]")
+        if hostname not in LOOPBACK_HOSTS:
+            raise ServiceUnavailable(f"Refusing non-loopback Ollama host {self.host}; Clipcon only uses local inference")
+        if "cloud" in self.model.split(":")[-1]:
+            raise ServiceUnavailable(f"Refusing Ollama cloud model {self.model}; choose a locally downloaded model")
+
     def _post(self, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
+        self._refuse_remote()
         url = f"http://{self.host}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"},

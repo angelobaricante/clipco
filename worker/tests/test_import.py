@@ -99,3 +99,19 @@ def test_inference_failure_marks_the_clip_failed_without_partial_context(home, c
     assert saved["segments"] == []
     assert stages[-1] == "failed" and "describing" in stages
     assert not any((home / "frames").rglob("*.jpg"))
+
+
+def test_an_interpretation_citing_no_supplied_evidence_is_not_saved(home, clip):
+    import pytest
+    from clipcon_worker.vision import InferenceError
+
+    vision = RecordedVision(only_invented=True)
+    worker = Worker(home, speech=RecordedSpeech(SPANS), vision=vision)
+    project = worker.create_project("Tutorial")
+
+    with pytest.raises(InferenceError, match="evidence"):
+        worker.import_clip(project["id"], clip)
+
+    assert vision.calls == 2  # one retry, then the clip fails
+    [saved] = worker.snapshot(project["id"])["clips"]
+    assert saved["status"] == "failed" and saved["segments"] == []

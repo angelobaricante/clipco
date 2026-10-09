@@ -46,8 +46,9 @@ class RecordedVision:
 
     identity = {"engine": "recorded-vision", "model": "fixture"}
 
-    def __init__(self, invent_ids: bool = False, fail: bool = False):
+    def __init__(self, invent_ids: bool = False, fail: bool = False, only_invented: bool = False):
         self.invent_ids = invent_ids
+        self.only_invented = only_invented
         self.fail = fail
         self.calls = 0
         self.requests = []
@@ -67,6 +68,8 @@ class RecordedVision:
         if self.invent_ids:
             observations.append({"frame_id": "f999", "text": "A frame that was never sampled."})
             cited = cited + ["t999"]
+        if self.only_invented:
+            cited = ["t999", "f999"]
         return {
             "label": "Test pattern explanation",
             "observations": observations,

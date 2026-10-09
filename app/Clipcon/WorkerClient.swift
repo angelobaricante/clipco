@@ -48,7 +48,7 @@ struct WorkerClient: Sendable {
         process.environment = environment
         let stdout = Pipe()
         process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
+        process.standardError = Self.logHandle() ?? FileHandle.nullDevice
         do {
             try process.run()
         } catch {
@@ -70,6 +70,19 @@ struct WorkerClient: Sendable {
             throw WorkerError.failed(kind: last.kind ?? "Error", message: last.message ?? "Unknown worker error")
         }
         return last
+    }
+
+    /// Worker diagnostics (stderr) are appended to ~/.clipcon/logs/worker.log.
+    private static func logHandle() -> FileHandle? {
+        let dir = URL(filePath: NSHomeDirectory()).appending(path: ".clipcon/logs")
+        let log = dir.appending(path: "worker.log")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: log.path) {
+            FileManager.default.createFile(atPath: log.path, contents: nil)
+        }
+        let handle = try? FileHandle(forWritingTo: log)
+        _ = try? handle?.seekToEnd()
+        return handle
     }
 
     func readiness() async throws -> Readiness {

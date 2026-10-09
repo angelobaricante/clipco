@@ -71,6 +71,10 @@ class Store:
                               (project_id, source_path)).fetchone()
         return dict(row) if row else None
 
+    def project_context_for_clip(self, clip_id: str) -> str:
+        return self.db.execute("SELECT p.context FROM projects p JOIN source_clips c ON c.project_id=p.id"
+                               " WHERE c.id=?", (clip_id,)).fetchone()[0]
+
     def add_clip(self, clip_id: str, project_id: str, source_path: str, filename: str) -> None:
         now = time.time()
         self.db.execute(
