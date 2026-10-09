@@ -74,12 +74,22 @@ def test_tone_is_not_analyzed_until_explicitly_enriched_from_saved_evidence(home
     worker_cli(home, "set-segment-tones", "--segment", drip["segment_id"], "--suggested")
     assert library(home, query="water", tone="hopeful")["results"] == []
 
+
     # Already enriched footage is not analysed again; an unknown tone is refused, not guessed.
     tone_calls = vision.tone_calls
     worker.enrich_tone(pid)
     assert vision.tone_calls == tone_calls
     [refused] = call(home, ("search_footage", {"scope": "library", "query": "water", "tone": "sparkly"}))
     assert refused.is_error and "calm" in refused.content[0].text
+
+    # A re-analysis that draws different Segment boundaries keeps and shows the creator's tones, never drops them.
+    worker_cli(home, "set-segment-tones", "--segment", drip["segment_id"], "--tones", "calm")
+    from clipco_worker.pipeline import RECIPE
+    Worker(home, speech=speech, vision=vision, recipe={**RECIPE, "silent_segment_seconds": 2.0}).retry(
+        pid, [drip["clip_id"]])
+    [clip] = [c for c in worker_cli(home, "snapshot", "--project", pid)["snapshot"]["clips"]
+              if c["id"] == drip["clip_id"]]
+    assert [c["tones"] for c in clip["unmatched_tone_corrections"]] == [["calm"]]
 
 
 ELSEWHERE = {
@@ -108,6 +118,7 @@ def two_projects_and_standalone(home, tmp_path):
     for name, seconds in (("glass-drip.mp4", 7.0), ("kettle.mp4", 5.0)):
         worker.import_clip(morning, make_clip(own / name, seconds=seconds, audio=False))
     worker.import_clip(None, make_clip(tmp_path / "sunrise.mp4", seconds=8.0, audio=False))
+    worker.enrich_tone(None)  # the creator asks for the whole library's tone
     return home, tutorial, morning
 
 

@@ -555,6 +555,10 @@ class Store:
             {"start": r["start"], "end": r["end_"], "role": r["role"], "updated_at": r["updated_at"]}
             for r in db.execute("SELECT * FROM segment_roles WHERE clip_id=? ORDER BY start", (clip["id"],))
             if (r["start"], r["end_"]) not in ranges]
+        clip["unmatched_tone_corrections"] = [
+            {"start": r["start"], "end": r["end_"], "tones": json.loads(r["tones"]), "updated_at": r["updated_at"]}
+            for r in db.execute("SELECT * FROM tone_corrections WHERE clip_id=? ORDER BY start", (clip["id"],))
+            if (r["start"], r["end_"]) not in ranges]
         return clip
 
     def review_clip(self, clip_id: str) -> dict:

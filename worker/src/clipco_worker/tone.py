@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 
 from .text import words
-from .vision import InferenceError
+from .vision import FrameItem, InferenceError, TranscriptItem
 
 # Bump when tone prompting or validation changes; earlier tone analyses stay readable and are re-enriched only
 # when the creator asks.
@@ -35,7 +35,7 @@ SYNONYMS = {
     "tense": ("tense", "tension", "anxious", "anxiety", "suspense", "suspenseful", "stressful", "stress",
               "uneasy", "urgent", "frustrating", "frustration", "struggle"),
     "energetic": ("energetic", "energy", "lively", "dynamic", "exciting", "excitement", "upbeat"),
-    "awe": ("awe", "wonder", "majestic", "epic", "awe-inspiring", "breathtaking", "grand"),
+    "awe": ("awe", "wonder", "majestic", "epic", "breathtaking", "grand"),
     "satisfying": ("satisfying", "satisfaction", "relief", "accomplishment", "accomplished"),
     "curious": ("curious", "curiosity", "intriguing", "mysterious", "mystery", "intrigue"),
 }
@@ -50,10 +50,7 @@ LIMITATIONS = ("Interpreted by a local model from a few sampled still frames, th
 
 def tones_in(query: str) -> list[str]:
     """Vocabulary tones a request asks for, in the order mentioned."""
-    found = [_BY_WORD[w] for w in words(query.replace("-", " ")) if w in _BY_WORD]
-    if "awe-inspiring" in query.casefold():
-        found.append("awe")
-    return list(dict.fromkeys(found))
+    return list(dict.fromkeys(_BY_WORD[w] for w in words(query) if w in _BY_WORD))
 
 
 def require_tone(tone: str | None) -> str | None:
@@ -161,8 +158,8 @@ class ToneRequest:
     original_filename: str
     start: float
     end: float
-    transcript: list  # vision.TranscriptItem
-    frames: list  # vision.FrameItem
+    transcript: list[TranscriptItem]
+    frames: list[FrameItem]
     observations: dict[str, str]  # local frame ID -> saved observation
 
 

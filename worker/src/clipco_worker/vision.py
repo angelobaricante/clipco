@@ -11,6 +11,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .tone import ToneRequest
 
 
 class InferenceError(Exception):
@@ -203,7 +207,7 @@ class OllamaVision:
     def describe(self, request: SegmentRequest) -> dict:
         return self._chat(SCHEMA, SYSTEM_PROMPT, build_prompt(request), request.frames)
 
-    def describe_tone(self, request) -> dict:
+    def describe_tone(self, request: "ToneRequest") -> dict:
         """Suggested emotional tone for one Segment from its saved frames, observations and transcript."""
         from . import tone
 

@@ -372,9 +372,7 @@ struct SearchHitRow: View {
                 if let caution = fit.caution { Text(caution).font(.caption).foregroundStyle(.orange).lineLimit(2) }
             }
             if let tone = hit.tone {
-                Text("Tone: " + (tone.state == "not_analyzed" ? "Not analyzed"
-                                 : tone.tones.isEmpty ? "No supported tone"
-                                 : tone.tones.map(\.capitalized).joined(separator: ", ")))
+                Text("Tone: " + SegmentTone.summary(state: tone.state, tones: tone.tones))
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(hit.relationships) { related in

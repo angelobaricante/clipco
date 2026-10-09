@@ -66,6 +66,8 @@ struct SourceClip: Decodable, Identifiable, Hashable, Sendable {
     var roleSummary: RoleSummary
     /// Creator role choices for Segment ranges that a later re-analysis no longer has.
     var unmatchedRoleCorrections: [UnmatchedRoleCorrection]
+    /// Creator tones for Segment ranges that a later re-analysis no longer has.
+    var unmatchedToneCorrections: [UnmatchedToneCorrection]
 
     var displayLabel: String { label ?? originalFilename }
 
@@ -93,6 +95,12 @@ struct UnmatchedRoleCorrection: Decodable, Hashable, Sendable {
     var start: Double
     var end: Double
     var role: String
+}
+
+struct UnmatchedToneCorrection: Decodable, Hashable, Sendable {
+    var start: Double
+    var end: Double
+    var tones: [String]
 }
 
 struct RoleSummary: Decodable, Hashable, Sendable {
@@ -208,7 +216,9 @@ struct SegmentTone: Decodable, Hashable, Sendable {
     static let vocabulary = ["calm", "hopeful", "joyful", "playful", "warm", "nostalgic", "melancholic", "tense",
                              "energetic", "awe", "satisfying", "curious"]
 
-    var summary: String {
+    var summary: String { Self.summary(state: state, tones: tones) }
+
+    static func summary(state: String, tones: [String]) -> String {
         switch state {
         case "not_analyzed": "Not analyzed"
         case "none_supported": "No supported tone"

@@ -47,6 +47,11 @@ PROJECT_PREFERENCE = 1.1
 FIT_KIND = {"connotation": "metaphorical", "tone": "emotional"}
 # Evidence of what the footage shows or says; a match on any of it is a literal fit, shown before a metaphor.
 DEPICTED = frozenset({"transcript", "creator_note", "label", "interpretation", "observation"})
+# What a literal match rests on: a model interpretation or label is named as one, never as what the footage shows.
+LITERAL_BASIS = {"observation": "A sampled frame shows it", "transcript": "It is said",
+                 "creator_note": "The creator's note mentions it",
+                 "interpretation": "The model interprets the footage as showing it",
+                 "label": "The model's label for the footage names it"}
 # Words that frame a mood or footage request ("something calm", "a tense moment") rather than describe content;
 # matching them in model text would pad library results with unrelated footage.
 REQUEST_FILLER = frozenset("""
@@ -603,9 +608,8 @@ class Index:
             total = (score + TONE_FIT_WEIGHT * len(matched)) * (PROJECT_PREFERENCE if own else 1.0)
             kind = FIT_KIND.get(best[1], "literal")
             text = clip_text(best[2])
-            explanation = {"literal": f"Shows or says what was asked for ({best[1]}): {text}",
-                           "metaphorical": f"Could stand for {text}",
-                           "emotional": f"Suggested tone {text}"}[kind]
+            explanation = (f"{LITERAL_BASIS[best[1]]}: {text}" if kind == "literal" else
+                           f"Could stand for {text}" if kind == "metaphorical" else f"Suggested tone {text}")
             if matched and kind != "emotional":
                 explanation += f" Emotional fit: {', '.join(matched)}."
             origins = [m["name"] for m in scopes[seg["id"]]["origins"]]

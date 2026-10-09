@@ -139,13 +139,14 @@ def frame_times(start: float, end: float, per_segment: int) -> list[float]:
 
 
 class Worker:
-    def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = True):
+    def __init__(self, home: Path, speech, vision, recipe: dict | None = None, tone_on_import: bool = False):
         self.home = Path(home)
         self.store = Store(self.home / "index.sqlite")
         self.speech = speech
         self.vision = vision
         self.recipe = recipe or RECIPE
-        self.tone_on_import = tone_on_import  # a new analysis also reads its Segments' emotional tone
+        # Tone is read only when the creator asks (enrich_tone); tests may also read it as part of a new analysis.
+        self.tone_on_import = tone_on_import
 
     def create_project(self, name: str, context: str = "") -> dict:
         return self.store.create_project(new_id("prj"), name.strip(), context.strip())
@@ -354,26 +355,25 @@ class Worker:
         pending = [s for s in self.store.review_clip(clip_id)["segments"] if s["tone"]["analyzed_at"] is None]
         for i, seg in enumerate(pending):
             report("reading_tone", {"clip_id": clip_id, "segment": i + 1, "of": len(pending)})
-            frames = [o["frame"] for o in seg["observations"]]
-            local = {f"t{n + 1}": t["id"] for n, t in enumerate(seg["transcript"])}
-            local |= {f"f{n + 1}": f["id"] for n, f in enumerate(frames)}
+            # The model sees short local IDs; code maps its citations back to the saved evidence IDs.
+            lines = {f"t{n + 1}": t for n, t in enumerate(seg["transcript"])}
+            seen = {f"f{n + 1}": o for n, o in enumerate(seg["observations"])}
             request = tone.ToneRequest(
                 original_filename=clip["original_filename"], start=seg["start"], end=seg["end"],
-                transcript=[TranscriptItem(f"t{n + 1}", t["start"], t["end"], t["text"])
-                            for n, t in enumerate(seg["transcript"])],
-                frames=[FrameItem(f"f{n + 1}", f["time"], Path(f["path"])) for n, f in enumerate(frames)],
-                observations={f"f{n + 1}": o["text"] for n, o in enumerate(seg["observations"])})
+                transcript=[TranscriptItem(k, t["start"], t["end"], t["text"]) for k, t in lines.items()],
+                frames=[FrameItem(k, o["frame"]["time"], Path(o["frame"]["path"])) for k, o in seen.items()],
+                observations={k: o["text"] for k, o in seen.items()})
             for f in request.frames:
                 if not f.path.is_file():
                     raise InferenceError(f"sampled frame {f.path.name} is no longer in Clipco's cache; "
                                          "re-analyse the clip to read its tone")
-            reading = self._read_tone(request, set(local))
-            reading.tones = [{**t, "evidence_ids": [local[r] for r in t["evidence_ids"]]} for t in reading.tones]
-            reading.connotations = [{**c, "evidence_ids": [local[r] for r in c["evidence_ids"]]}
-                                    for c in reading.connotations]
+            local = {k: t["id"] for k, t in lines.items()} | {k: o["frame"]["id"] for k, o in seen.items()}
+            reading = self._validated_tone(request, set(local))
+            for item in reading.tones + reading.connotations:
+                item["evidence_ids"] = [local[r] for r in item["evidence_ids"]]
             self.store.save_tone(seg["id"], reading, tone.TONE_RECIPE, self.vision.identity)
 
-    def _read_tone(self, request: tone.ToneRequest, known: set[str], attempts: int = 2) -> tone.ToneReading:
+    def _validated_tone(self, request: tone.ToneRequest, known: set[str], attempts: int = 2) -> tone.ToneReading:
         for attempt in range(attempts):
             try:
                 return tone.validate(self.vision.describe_tone(request), known)

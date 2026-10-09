@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=SEARCH_PAGE)
     p.add_argument("--offset", type=int, default=0)
     p.add_argument("--include-excluded", action="store_true", help="also match clips the creator excluded")
-    p.add_argument("--tone", help="library scope: only Segments with this emotional tone")
+    p.add_argument("--tone", help="only Segments with this emotional tone (never footage not yet analysed for tone)")
     args = parser.parse_args(argv)
     if getattr(args, "library", False):
         args.project = None

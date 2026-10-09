@@ -74,6 +74,10 @@ final class AppModel {
     /// The browser shows reusable B-roll from the whole Footage library; `project` stays the Project being
     /// edited, whose own footage library search prefers.
     var showingLibrary = false
+    /// The worker destination of the shown clips: the open Project, or the library (nil).
+    var scopeProjectID: String? { showingLibrary ? nil : project?.id }
+    /// Something is open to browse: a Project, or the library.
+    var hasScope: Bool { project != nil || showingLibrary }
     var clips: [SourceClip] = []
     var filter: FootageFilter = .all
     /// Selected Source clips in the browser (Finder-style multiple selection).
@@ -252,7 +256,7 @@ final class AppModel {
             let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
                 await MainActor.run { self?.track(event) }
             }
-            _ = try await worker.enrichTone(projectID: showingLibrary ? nil : project?.id,
+            _ = try await worker.enrichTone(projectID: scopeProjectID,
                                             clipIDs: targets.map(\.id), onProgress: onProgress)
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
@@ -351,11 +355,11 @@ final class AppModel {
     /// Re-verifies every analysed clip's original (moved, deleted, edited, or restored) and the analysis
     /// settings, then shows the result. Skipped while an import or retry is writing the index.
     func checkSources() async {
-        guard project != nil || showingLibrary, activity == nil else { return }
+        guard hasScope, activity == nil else { return }
         isCheckingSources = true
         defer { isCheckingSources = false }
         do {
-            try await worker.checkSources(projectID: showingLibrary ? nil : project?.id)
+            try await worker.checkSources(projectID: scopeProjectID)
             try await reload()
         } catch {
             errorMessage = "Could not check the original files: \(error.localizedDescription)"
@@ -370,7 +374,7 @@ final class AppModel {
     /// Re-analyses clips from their originals with real progress. Each keeps its ID, note, and exclusion;
     /// unchanged content is reused without inference, and a missing original is reported, not analysed.
     func retry(_ targets: [SourceClip]) async {
-        guard project != nil || showingLibrary, canRetry(targets) else { return }
+        guard hasScope, canRetry(targets) else { return }
         let name = targets.count == 1 ? targets[0].originalFilename : "\(targets.count) clips"
         activity = ImportActivity(filename: name, stage: "Starting", clipID: targets.count == 1 ? targets[0].id : nil)
         defer { activity = nil }
@@ -379,7 +383,7 @@ final class AppModel {
             let onProgress: @Sendable (WorkerEvent) async -> Void = { [weak self] event in
                 await MainActor.run { self?.track(event) }
             }
-            _ = try await worker.retry(projectID: showingLibrary ? nil : project?.id, clipIDs: targets.map(\.id),
+            _ = try await worker.retry(projectID: scopeProjectID, clipIDs: targets.map(\.id),
                                        onProgress: onProgress)
             try await reload()
             if !trimmedQuery.isEmpty { await search() }
@@ -482,10 +486,10 @@ final class AppModel {
     }
 
     func reload() async throws {
-        guard project != nil || showingLibrary else { return }
+        guard hasScope else { return }
         reloadGeneration += 1
         let generation = reloadGeneration
-        let snapshot = try await worker.snapshot(projectID: showingLibrary ? nil : project?.id)
+        let snapshot = try await worker.snapshot(projectID: scopeProjectID)
         guard generation == reloadGeneration else { return }  // a newer reload is already on its way
         clips = snapshot.clips
         // Drop clips that no longer exist; never invent a selection the creator cleared.
@@ -498,7 +502,7 @@ final class AppModel {
     /// another clip is still being analysed.
     func search() async {
         let query = trimmedQuery
-        guard project != nil || showingLibrary, !query.isEmpty else {
+        guard hasScope, !query.isEmpty else {
             searchResults = nil
             return
         }

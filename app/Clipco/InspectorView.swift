@@ -140,7 +140,13 @@ struct CreatorControls: View {
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
         }
-        if clip.projects.count > 1 {
+        ForEach(clip.unmatchedToneCorrections, id: \.self) { kept in
+            Label("Your tones (\(kept.tones.isEmpty ? "none" : kept.tones.joined(separator: ", "))) for "
+                  + "\(kept.start.timecode)–\(kept.end.timecode) no longer match a segment after re-analysis. "
+                  + "Choose them again below.", systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+        }
+        if clip.projects.count > 1 && !model.showingLibrary {
             LabeledContent("Also in") {
                 Text(clip.projects.filter { $0.projectId != model.project?.id }.map(\.name)
                     .joined(separator: ", "))
