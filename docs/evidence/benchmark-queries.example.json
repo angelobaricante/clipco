@@ -1,0 +1,15 @@
+[
+  {
+    "request": "Find where I correct something I said earlier. Give both the earlier statement and the correction.",
+    "expected": [{"file": "FILL IN after watching the footage", "start": 0, "end": 0, "why": "earlier statement"},
+                 {"file": "FILL IN", "start": 0, "end": 0, "why": "the correction"}]
+  },
+  {
+    "request": "Find B-roll that could cover the part where I explain how the product is used.",
+    "expected": [{"file": "FILL IN", "start": 0, "end": 0, "why": "supporting shot"}]
+  },
+  {
+    "request": "Find my best take of the introduction.",
+    "expected": [{"file": "FILL IN", "start": 0, "end": 0, "why": "intro take"}]
+  }
+]

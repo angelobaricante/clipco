@@ -8,7 +8,18 @@ The approved MVP uses native SwiftUI, a local Python worker, Ollama/Qwen3.5, whi
 
 ## Project status
 
-Tasks #2–#4 (one real clip, Codex retrieval through MCP, full-Project discovery) are complete. Task #5 (native review with notes and exclusions) is in review. Recovery, offline operation, and savings still need to be demonstrated. The image below is an approved browser design study with illustrative media, not a running native app.
+Tasks #2–#6 are complete:
+- one real clip;
+- Codex retrieval through MCP;
+- full-Project discovery;
+- native review with notes and exclusions;
+- recovery of missing and changed footage.
+
+Task #7 status:
+- Local indexing and search with outbound network denied are shown at process level.
+- The machine-level offline run and the token benchmark are ready for the creator to run. Until then, no savings are claimed.
+
+See [docs/DEMO.md](docs/DEMO.md) for evidence, the demo path, versions and licenses, and the submission checklist. The image below is an approved browser design study with illustrative media, not a running native app.
 
 ![Approved macOS workspace direction](docs/design/macos-workspace.jpg)
 
@@ -38,7 +49,7 @@ Model weights, raw footage, local indexes, and environment-specific caches are k
 Verified on an M5 Mac (24 GB) with macOS 26.5.1 and Xcode 26.3. These are one-time setup steps and need internet:
 
 ```sh
-brew install ffmpeg ollama whisper-cpp uv xcodegen
+brew install ffmpeg ollama whisper.cpp uv xcodegen
 mkdir -p ~/.clipcon/models ~/.clipcon/logs
 # Multilingual speech (English, Tagalog, Taglish), ~1.6 GB
 curl -L -o ~/.clipcon/models/ggml-large-v3-turbo.bin \
@@ -58,6 +69,7 @@ Day to day, one script starts and stops everything (local-only Ollama, worker de
 scripts/clipcon start    # then import footage with ⇧⌘I
 scripts/clipcon status   # Ollama, analysis readiness, app, Codex MCP helpers
 scripts/clipcon stop     # quit the app, unload the model, stop the Ollama the script started
+scripts/clipcon offline-proof --project ID CLIP   # with networking off: index CLIP live, search, save a report
 ```
 
 Or run the app from Xcode:
