@@ -20,6 +20,7 @@ No token savings are claimed until the benchmark has been run and its answers gr
 
 - **Offline conditions:** the worker tried TCP connections to `1.1.1.1:443`, `8.8.8.8:53` and `captive.apple.com:80`. All three were refused (`PermissionError: Operation not permitted`). Loopback to Ollama worked.
   - This is a process-level proof. The Mac itself was still online, because this agent session needs the network.
+  - The profile allows Unix sockets, so name lookups through the system resolver may still have worked. Only connections were blocked.
   - The machine-level run below is the stronger proof.
 - **Live inference:** `611D69BD-…MP4` (69.9 s, HEVC 1440×2560, English) was analysed live: `live_inference: true`, `ready`, 3 Segments.
   - Total import time, including the cold model load: **30.1 s**.
@@ -29,29 +30,32 @@ No token savings are claimed until the benchmark has been run and its answers gr
   - speech: whisper.cpp `ggml-large-v3-turbo.bin` with Silero VAD v5.1.2;
   - vision: `qwen3.5:4b-q4_K_M` on Ollama, digest `d8b0f5e9…`.
 - **Memory:**
-  - worker plus its largest child process (whisper-cli/ffmpeg): peak 1,974 MB;
+  - worker: at most 1,974 MB. This is an upper bound: the worker's peak plus its largest child's (whisper-cli/ffmpeg) peak, which may not have happened at the same moment. The JSON field from this run is named `worker_plus_largest_child_peak_mb`;
   - Ollama's loaded model: 3,254 MB, all on the GPU.
   - Ollama's process resident size could not be read inside the sandbox (`ps` is blocked there), and the report says so.
 - **Originals:** the SHA-256 of the source was identical before and after (`5112fa90…`).
 
 ### Warm retrieval (2026-10-10, creator's real index, read-only)
 
-The stdio MCP server started and completed its handshake in **606 ms**.
+[`scripts/measure-mcp-latency.py`](../scripts/measure-mcp-latency.py) calls the real stdio MCP server the way Codex does. Output: [`evidence/warm-retrieval-2026-10-10.txt`](evidence/warm-retrieval-2026-10-10.txt).
 
-Warm calls, 5 repeats each:
+- Server start plus handshake took 241 ms (606 ms in an earlier run).
+- Warm calls, 5 repeats each:
 
 | Tool | Latency |
 | --- | --- |
-| `get_project_overview` | 1.0–5.0 ms |
-| `search_footage` | 1.4–2.2 ms |
-| `get_segment_context` | 1.1 ms |
-| `get_segment_preview` | 1.2 ms |
-| `resolve_media` | 0.9 ms |
+| `get_project_overview` | 1.0–4.7 ms |
+| `search_footage` | 1.5–2.5 ms |
+| `get_segment_context` | 1.0 ms |
+| `get_segment_preview` | 1.3 ms |
+| `resolve_media` | 1.0 ms |
 
-- Result sizes for these calls: `search_footage` returned 1.2–7.9 K characters and `get_segment_preview` returned 25 K characters (one JPEG frame).
-- A command-line `search` peaked at 32 MB resident memory.
+- Result sizes: `search_footage` returned 1.2–7.9 K characters, and `get_segment_preview` returned 33 K characters (one JPEG frame, base64). Characters are not tokens.
 
-These are the targets from the spec: under 2 s warm retrieval and under 10 min demo indexing. Both were met on this M5/24 GB Mac. That does not establish support for lower-memory Macs.
+Against the spec's provisional targets:
+- **Under 2 s warm retrieval:** met on this M5/24 GB Mac.
+- **Under 10 min demo indexing:** not measured on a demo corpus. One 70 s clip took 30 s cold.
+- Neither result establishes support for lower-memory Macs.
 
 ## Reproduce
 
@@ -83,10 +87,12 @@ These are the targets from the spec: under 2 s warm retrieval and under 10 min d
 1. Copy [`evidence/benchmark-queries.example.json`](evidence/benchmark-queries.example.json). Write the three discovery requests for your corpus, and fill in each request's expected file and time range after watching the footage.
 2. Run:
    ```sh
-   worker/.venv/bin/clipcon-benchmark --model <the same model for both routes> \
+   worker/.venv/bin/clipcon-benchmark --send-footage-to-codex --model <the same model for both routes> \
      --footage /path/to/project/originals --queries my-queries.json
    ```
-   Each route runs requests 1–3 in one Codex session, then asks request 1 again (the repeat / cache-reuse row).
+   - The command refuses to run without `--send-footage-to-codex`.
+   - Each route runs requests 1–3 in one Codex session, then asks request 1 again in the same session. That last row shows conversation/prompt-cache reuse. It is not a fresh-session repeat.
+   - Codex's sandbox does not stop the baseline from reading Clipcon's own index. The report counts any shell command that touches it (`Index reads` column) and warns. A baseline that read the index is not a clean comparison.
 3. The JSON report records, per request, from Codex's own session log:
    - input, cached and uncached input tokens, and output and reasoning tokens;
    - model requests, and tool calls by tool;

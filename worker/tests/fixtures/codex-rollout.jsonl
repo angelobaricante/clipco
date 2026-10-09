@@ -14,5 +14,6 @@
 {"timestamp": "2026-10-10T01:01:00.000Z", "type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-2"}}
 {"timestamp": "2026-10-10T01:01:00.100Z", "type": "turn_context", "payload": {"turn_id": "turn-2", "model": "gpt-6.1-sol", "effort": "medium"}}
 {"timestamp": "2026-10-10T01:01:02.000Z", "type": "token_usage_record", "payload": {"turn_id": "turn-2", "usage": {"input_tokens": 14000, "cached_input_tokens": 13000, "cache_write_input_tokens": 0, "output_tokens": 60, "reasoning_output_tokens": 0, "total_tokens": 14060}}}
+{"timestamp": "2026-10-10T01:01:02.100Z", "type": "event_msg", "payload": {"type": "item_completed", "turn_id": "turn-2", "item": {"type": "CommandExecution", "command": ["/bin/zsh", "-lc", "sqlite3 \"$HOME/Library/Application Support/Clipcon/index.sqlite\" .tables"], "status": "completed", "exit_code": 0}}}
 {"timestamp": "2026-10-10T01:01:02.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 39000, "cached_input_tokens": 33000, "cache_write_input_tokens": 0, "output_tokens": 300, "reasoning_output_tokens": 40, "total_tokens": 39300}}}}
 {"timestamp": "2026-10-10T01:01:02.500Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn-2", "last_agent_message": "Same segment."}}

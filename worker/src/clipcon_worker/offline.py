@@ -1,7 +1,8 @@
 """Offline proof: show the internet is unreachable, then index one new clip live and search it locally.
 
-Local-only configuration is not proof, so the report records what was actually attempted: outbound
-connections to well-known public hosts and DNS resolution, each with the error it got.
+Local-only configuration is not proof, so the report records what was actually attempted: a TCP connection
+to each of several public hosts (a name is resolved first), each with the error it got. DNS lookups are not
+probed on their own.
 """
 
 import json
@@ -101,8 +102,9 @@ def memory(ollama_host: str) -> dict:
     """Peak memory of this worker process and current resident memory of the local Ollama processes."""
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS
     peak += resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss  # largest child: whisper-cli or ffmpeg
-    out = {"worker_plus_largest_child_peak_mb": round(peak / 2**20),
-           "note": "worker peak = this process + its largest child (ru_maxrss), measured at report time"}
+    out = {"worker_peak_upper_bound_mb": round(peak / 2**20),
+           "note": "upper bound: this process's peak plus its largest child's peak (ru_maxrss), which may not "
+                   "have occurred at the same moment"}
     try:
         ps = subprocess.run(["ps", "-axo", "rss=,comm="], capture_output=True, text=True, check=False).stdout
         out["ollama_resident_mb"] = round(sum(int(line.split(None, 1)[0]) for line in ps.splitlines()

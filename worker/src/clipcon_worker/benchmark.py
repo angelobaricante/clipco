@@ -29,6 +29,16 @@ def tool_name(item: dict) -> str | None:
             "Extension": f"extension:{item.get('kind')}"}.get(kind)
 
 
+# Where Clipcon keeps its index: a direct-inspection route that reads these is not a clean baseline.
+INDEX_MARKERS = ("Application Support/Clipcon", "index.sqlite", "clipcon-mcp", "clipcon-worker")
+
+
+def reads_clipcon_index(item: dict) -> bool:
+    command = item.get("command")
+    text = " ".join(command) if isinstance(command, list) else str(command or "")
+    return item.get("type") == "CommandExecution" and any(m in text for m in INDEX_MARKERS)
+
+
 def failed(item: dict) -> bool:
     return item.get("status") not in (None, "completed") or item.get("exit_code") not in (None, 0)
 
@@ -59,7 +69,7 @@ def summarize_rollout(lines: list[str]) -> dict:
             turns[current] = {"turn_id": current, "answer": None, "_start": at, "_end": None, "model_requests": 0,
                               "input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0,
                               "reasoning_output_tokens": 0, "_tools": Counter(), "failed_tool_calls": 0,
-                              "tool_result_text_chars": 0, "tool_result_images": 0}
+                              "tool_result_text_chars": 0, "tool_result_images": 0, "clipcon_index_reads": 0}
         elif kind == "token_usage_record" and payload.get("turn_id") in turns:
             turn, usage = turns[payload["turn_id"]], payload["usage"]
             turn["model_requests"] += 1
@@ -72,6 +82,7 @@ def summarize_rollout(lines: list[str]) -> dict:
             if name := tool_name(item):
                 turn["_tools"][name] += 1
                 turn["failed_tool_calls"] += failed(item)
+                turn["clipcon_index_reads"] += reads_clipcon_index(item)
         elif sub in ("function_call_output", "custom_tool_call_output") and current in turns:
             for part in output_parts(payload.get("output")):
                 if part.get("type") == "input_image":
@@ -119,7 +130,8 @@ def run_route(codex: str, route: str, model: str, footage: Path, queries: list[s
               servers: list[str], workdir: Path) -> dict:
     disabled = [s for s in servers if route == "baseline" or s != "clipcon"]
     overrides = [arg for s in disabled for arg in ("-c", f"mcp_servers.{s}.enabled=false")]
-    common = ["--json", "--skip-git-repo-check", "-m", model, *overrides]
+    # `exec resume` takes no -s/-C, so the sandbox is pinned by config for every request alike.
+    common = ["--json", "--skip-git-repo-check", "-m", model, "-c", 'sandbox_mode="workspace-write"', *overrides]
     session_id, started = None, time.time()
     for n, query in enumerate([*queries, queries[0]]):
         prompt = PROMPT.format(footage=footage, query=query)
@@ -130,12 +142,14 @@ def run_route(codex: str, route: str, model: str, footage: Path, queries: list[s
             raise RuntimeError(f"{route} request {n + 1} failed: {proc.stderr.strip()[-2000:]}")
         session_id = session_id or next((json.loads(l).get("thread_id") for l in proc.stdout.splitlines()
                                          if '"thread_id"' in l), None)
-    rollouts = sorted((p for p in sessions.rglob("rollout-*.jsonl") if p.stat().st_mtime >= started
-                       and (session_id is None or session_id in p.name)), key=lambda p: p.stat().st_mtime)
+        if session_id is None:  # never guess: another Codex session could be writing logs meanwhile
+            raise RuntimeError(f"{route}: Codex printed no thread_id, so its session log can't be identified")
+    rollouts = sorted((p for p in sessions.rglob(f"rollout-*{session_id}.jsonl") if p.stat().st_mtime >= started),
+                      key=lambda p: p.stat().st_mtime)
     if not rollouts:
-        raise RuntimeError(f"no Codex session log for the {route} route under {sessions}")
+        raise RuntimeError(f"no Codex session log for {session_id} under {sessions}")
     summary = summarize_rollout(rollouts[-1].read_text().splitlines())
-    labels = [f"request {i + 1}" for i in range(len(queries))] + ["request 1 repeated"]
+    labels = [f"request {i + 1}" for i in range(len(queries))] + ["request 1 again, same session"]
     for turn, label in zip(summary["turns"], labels):
         turn["request"] = label
     return {"route": route, "disabled_mcp_servers": disabled, "session_log": str(rollouts[-1]), **summary}
@@ -151,7 +165,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path.home() / ".clipcon" / "evidence")
     parser.add_argument("--codex-home", type=Path, default=Path.home() / ".codex")
     parser.add_argument("--routes", nargs="+", default=["baseline", "mcp"], choices=["baseline", "mcp"])
+    parser.add_argument("--send-footage-to-codex", action="store_true",
+                        help="required: Codex sends what it inspects (frames, transcripts, index context) to OpenAI")
     args = parser.parse_args(argv)
+    if not args.send_footage_to_codex:
+        parser.error("both routes send footage-derived content to OpenAI and spend Codex credits; "
+                     "pass --send-footage-to-codex once the creator has agreed")
 
     spec = json.loads(args.queries.read_text())
     queries = [q["request"] for q in spec]
@@ -168,19 +187,22 @@ def main(argv: list[str] | None = None) -> int:
     path.write_text(json.dumps(report, indent=2) + "\n")
     print(table(report))
     print(f"\nReport: {path}\nGrade each answer against `expected` by hand before quoting any result.")
+    if any(t["clipcon_index_reads"] for r in report["routes"] if r["route"] == "baseline" for t in r["turns"]):
+        print("WARNING: the baseline read Clipcon's own index through the shell; it is not a clean baseline.")
     return 0
 
 
 def table(report: dict) -> str:
     rows = [("| Route | Request | Input | Cached | Uncached | Output | Requests | Tools | Failed | Result chars | "
-             "Images | Wall s |"), "|" + "---|" * 12]
+             "Images | Index reads | Wall s |"), "|" + "---|" * 13]
     for route in report["routes"]:
         for t in route["turns"]:
             tools = ", ".join(f"{k}×{v}" for k, v in t["tool_calls"].items()) or "none"
             rows.append(f"| {route['route']} | {t.get('request', t['turn_id'])} | {t['input_tokens']} | "
                         f"{t['cached_input_tokens']} | {t['uncached_input_tokens']} | {t['output_tokens']} | "
                         f"{t['model_requests']} | {tools} | {t['failed_tool_calls']} | "
-                        f"{t['tool_result_text_chars']} | {t['tool_result_images']} | {t['wall_seconds']} |")
+                        f"{t['tool_result_text_chars']} | {t['tool_result_images']} | {t['clipcon_index_reads']} | "
+                        f"{t['wall_seconds']} |")
     return "\n".join(rows)
 
 
