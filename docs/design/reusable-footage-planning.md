@@ -1,6 +1,6 @@
 # Reusable footage and import improvements
 
-Status: decisions 1–21 accepted by the creator on 2026-10-10 (Asia/Manila); awaiting final confirmation of the consolidated implementation brief. No application behavior has changed. This extends the completed MVP without rewriting its historical specification or evidence.
+Status: all 21 decisions and the consolidated implementation brief confirmed by the creator on 2026-10-10 (Asia/Manila). Published through the requested to-spec workflow as [specification #15](https://github.com/angelobaricante/clipcon/issues/15), with implementation tasks #16–19. No application behavior has changed. This extends the completed MVP without rewriting its historical specification or evidence.
 
 ## Requested direction
 
@@ -73,7 +73,7 @@ Sequential is the default. Auto can overlap independently bounded media, speech,
 | 3. Import and queue UX | Independent Project creation, native multi-item/folder drops, direct library import, durable Sequential queue, pause/cancel/resume, waiting and progress states | Native interaction checks plus interruption/restart and mixed-drop behavior; imports work before setup and during active jobs; completed footage remains reviewable |
 | 4. Adaptive processing | Auto limits and resource feedback, safe stage overlap and atomic publication, throughput/memory measurements | Same-corpus Sequential/Auto comparison with quality parity; pressure reduces new work safely; no duplicated jobs or partial ready results; no speed or low-end support claim without evidence |
 
-Create these as approved GitHub implementation issues after final shared-understanding confirmation. Work one at a time with native blockers, claims, and progress/validation handoffs. Keep the completed demo usable throughout. Confirm any remaining submission deadline against the organizer's authoritative cutoff before scheduling implementation; the historical 10:00 Asia/Manila assumption alone is insufficient.
+The creator confirmed the consolidated scope and requested specification publication. These tasks are published as native sub-issues #16–19 of specification #15, with blocking chain #16 → #17 → #18 → #19. Work one at a time with native blockers, claims, and progress/validation handoffs. Keep the completed demo usable throughout. Confirm any remaining submission deadline against the organizer's authoritative cutoff before scheduling implementation; the historical 10:00 Asia/Manila assumption alone is insufficient.
 
 ## Acceptance scenarios
 
@@ -92,7 +92,7 @@ Create these as approved GitHub implementation issues after final shared-underst
 
 Subjective quality checks require creator-reviewed real clips and expected relevant ranges. Deterministic fixtures can verify policy, queue, migration, and failure behavior but do not prove emotional quality or measured hardware throughput.
 
-Resolved terms are captured in `GLOSSARY.md`; durable boundary decisions are recorded in `docs/adr/`. The next step is final confirmation of this consolidated scope, not another open product decision.
+Resolved terms are captured in `GLOSSARY.md`; durable boundary decisions are recorded in `docs/adr/`. The [published specification snapshot](../reusable-footage-spec.md) synthesizes the confirmed decisions and acceptance checks. The next implementation action is to read and claim #16 after checking active claims and its native blockers.
 
 ## Research
 
