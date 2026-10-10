@@ -1,18 +1,20 @@
-# Clipco — reusable B-roll library and adaptive indexing
+# Clipco — reusable B-roll library and recoverable imports
 
 Status: ready-for-agent. Published as [specification #15](https://github.com/angelobaricante/clipco/issues/15). The creator accepted all 21 design decisions and confirmed the consolidated scope on 2026-10-10 (Asia/Manila). GitHub is the authoritative tracker.
+
+Scope amendment, 2026-10-10 (Asia/Manila): the creator removed #19 (Auto/adaptive processing) from this MVP. Sequential processing and the recoverable queue remain in scope. The next priority is evidence-grounded footage discovery: given a video idea, the editing agent should find useful A-roll, relevant spoken corrections, and supporting B-roll with verifiable source ranges and clear uncertainty. Further context-quality design remains under discussion; no replacement algorithm is selected.
 
 ## Problem Statement
 
 A creator's useful B-roll is scattered across Projects. Current retrieval searches one Project at a time and primarily matches words, so footage from another content idea cannot help an editing agent find stronger visual or emotional support. Whole-clip A-roll/B-roll classification also hides cutaways inside mixed recordings. Reimporting one file into multiple Projects duplicates its analysis, while deleting a Project removes context that could remain useful.
 
-Import and Project creation take unnecessary steps. Creation is coupled to footage selection and model readiness, the app accepts footage only through a picker, and indexing runs sequentially without a durable pause/cancel/resume queue. Creators need faster processing where their hardware benefits from overlap, while constrained devices remain responsive and retain the same analysis quality.
+Import and Project creation take unnecessary steps. Creation is coupled to footage selection and model readiness, the app accepts footage only through a picker, and indexing runs sequentially without a durable pause/cancel/resume queue. Creators need reliable import and recoverable processing while completed footage remains available for review.
 
 ## Solution
 
 Keep Project footage-context retrieval for the main narrative, corrections, and repeated takes. Add a persistent Footage library for reusable B-roll that can support another video's content or emotional tone, preserving evidence, source ranges, origin, and creator control. Current-Project footage receives a modest preference among comparable candidates; better-fitting footage from elsewhere remains eligible.
 
-The native Mac app exposes a Reusable B-roll view and independent Project creation, accepts dropped videos and folders, and registers work in a recoverable queue. Sequential processing stays the default. Auto uses measured, bounded stage overlap where beneficial and reduces concurrency under memory or thermal pressure. Originals remain untouched; analysis and saved-index retrieval remain local.
+The native Mac app exposes a Reusable B-roll view and independent Project creation, accepts dropped videos and folders, and registers work in a recoverable queue. Sequential processing remains the supported mode, with resource/readiness checks and explicit waiting states. Originals remain untouched; analysis and saved-index retrieval remain local.
 
 ## User Stories
 
@@ -67,18 +69,15 @@ The native Mac app exposes a Reusable B-roll view and independent Project creati
 49. As a Creator, I want one failure to preserve other completed clips, so that an unreliable source does not invalidate the library.
 50. As a Creator, I want responsive browsing during indexing, so that preparation does not prevent review.
 51. As a Creator, I want Sequential processing by default, so that concurrency does not unexpectedly consume my device's resources.
-52. As a Creator, I want Auto to use available compute when beneficial, so that stronger devices can finish sooner.
-53. As a Creator, I want Auto to reduce new concurrency under pressure, so that throughput does not come at the expense of responsiveness.
-54. As a Creator, I want the same quality settings in both modes, so that speed does not silently weaken analysis.
-55. As a Creator, I want explicit guidance when a configuration cannot run, so that Sequential is not mistaken for guaranteed support on every Mac.
-56. As a Creator, I want measured throughput and resource use, so that speed and supported-device claims reflect real evidence.
-57. As an Editing agent, I want explicit Project and library retrieval scopes, so that results do not depend on the GUI's active Project.
-58. As an Editing agent, I want compact ranked results with reasons and origin, so that I can discover suitable footage without loading the whole library.
-59. As an Editing agent, I want scoped evidence expansion, so that following a shared source does not reveal excluded membership notes.
-60. As an Editing agent, I want validated previews and media locators, so that I can verify and use the correct unchanged source range.
-61. As an Editing agent, I want existing Project retrieval calls to keep working, so that the library upgrade does not break established workflows.
-62. As an Editing agent, I want empty, truncated, unavailable, and unanalysed results explicit, so that I do not invent evidence or infer a missing tone.
-63. As a Creator, I want local analysis and saved-index retrieval after setup, so that footage is not silently sent to cloud inference.
+52. As a Creator, I want explicit guidance when a configuration cannot run, so that Sequential is not mistaken for guaranteed support on every Mac.
+53. As a Creator, I want measured processing time and resource use, so that supported-device claims reflect real evidence.
+54. As an Editing agent, I want explicit Project and library retrieval scopes, so that results do not depend on the GUI's active Project.
+55. As an Editing agent, I want compact ranked results with reasons and origin, so that I can discover suitable footage without loading the whole library.
+56. As an Editing agent, I want scoped evidence expansion, so that following a shared source does not reveal excluded membership notes.
+57. As an Editing agent, I want validated previews and media locators, so that I can verify and use the correct unchanged source range.
+58. As an Editing agent, I want existing Project retrieval calls to keep working, so that the library upgrade does not break established workflows.
+59. As an Editing agent, I want empty, truncated, unavailable, and unanalysed results explicit, so that I do not invent evidence or infer a missing tone.
+60. As a Creator, I want local analysis and saved-index retrieval after setup, so that footage is not silently sent to cloud inference.
 
 ## Implementation Decisions
 
@@ -104,9 +103,8 @@ The native Mac app exposes a Reusable B-roll view and independent Project creati
 20. **Lifecycle.** Pause stops new jobs while active clips finish. Queued cancellation removes analysis work without deleting footage. Active cancellation stops safely, contains media/speech child-process work and active inference requests, and leaves a truthful retryable state. Restart reconciles interrupted work and offers explicit resume; completed analysis is reused rather than repeated. Source removal must not race an active publisher into resurrecting deleted index context.
 21. **Coherent publication.** The worker owns SQLite writes and publishes completed evidence/analysis atomically. Readers can use completed sources while other work runs. Coordinate job ownership and writes rather than sharing the existing thread-bound Store connection among worker threads. Derivation/replacement of relationships must handle references across shared sources and scoped memberships without partial ready results.
 22. **Sequential.** Sequential is the default and processes one analysis job at a time. It still checks resources and service/model readiness: temporary pressure waits, while a configuration that cannot run gets actionable guidance. No silent smaller-model substitution, reduced analysis quality, cloud fallback, or automatic model download is allowed.
-23. **Auto.** Auto uses bounded, independently limited stage overlap only where the installed runtime and measured device envelope show benefit. Account for combined speech, media, vision, service context-memory, and other device activity. Reduce starting concurrency under memory/thermal pressure while preserving completed results and quality settings. An unsupported or unhelpful parallel stage may stay sequential.
-24. **Measurement.** Compare the same corpus and model/recipe settings under Sequential and Auto. Record throughput, per-job and total wall time, observed memory/resource state, failures, and grounding/retrieval quality. The M5/24 GB demo is the only existing hardware evidence; do not infer low-memory support or speedups from it. A smaller-model configuration needs separate research, validation, and disclosure.
-25. **Delivery.** Implement four successive vertical tasks: library foundation; reusable retrieval and review; import/queue UX; adaptive processing. Each must pass its external acceptance checks before the next starts. Ready-for-agent means specified, not unblocked or claimed. Preserve the completed demo and keep implementation claims, native dependencies, and evidence in GitHub.
+23. **Measurement.** Record the real Sequential pipeline on representative footage with fixed model/recipe settings. Record throughput, per-job and total wall time, observed memory/resource state, failures, and grounding/retrieval quality. The M5/24 GB demo is the only existing hardware evidence; do not infer low-memory support or speedups from it. A smaller-model configuration needs separate research, validation, and disclosure.
+24. **Delivery.** Complete three successive vertical tasks: library foundation; reusable retrieval and review; import/queue UX. Auto/adaptive processing (#19) was removed by the creator; further feature expansion is paused while MCP context quality is evaluated. Each must pass its external acceptance checks before the next starts. Ready-for-agent means specified, not unblocked or claimed. Preserve the completed demo and keep implementation claims, native dependencies, and evidence in GitHub.
 
 ## Testing Decisions
 
@@ -119,11 +117,12 @@ The native Mac app exposes a Reusable B-roll view and independent Project creati
 7. **Native UX.** In the real app, create an empty Project without models; drop multiple videos/nested folders and mixed valid/invalid items into Project, library, and empty-workspace destinations; change Projects while queued work waits; and exercise library selection, inspector corrections, reuse toggles, previews, keyboard/focus, and removal. Prototype artwork or simulated controls are not evidence.
 8. **Queue behavior.** At the same worker entry point, append work during processing; wait for missing setup/resources; pause; cancel queued and active work; interrupt and restart; explicitly resume; retry a failure; and remove a queued/active source. Observe truthful states, no duplicate ownership, no orphaned processing, no partial ready publication, completed-result reuse, and preserved originals.
 9. **Offline and recovery.** With dependencies cached and the offline condition recorded, retrieve/search/review saved library context without inference services. Separately demonstrate local real-model enrichment/import offline. Missing/changed originals must refuse usable source locators; a failed clip preserves other results. Codex's remote inference remains a separate online concern.
-10. **Performance.** Use the same real corpus, analysis settings, and correctness checks in Sequential and Auto. Record resource measurements and UI responsiveness during overlap and pressure reductions. No fixed speedup or universal low-end support is promised. Where pressure cannot be produced safely on available hardware, distinguish injected scheduler-policy checks from measured real-device behavior.
+10. **Performance.** Record Sequential processing time, resource measurements, and UI responsiveness on real footage while queued work runs. No fixed speedup or universal low-end support is promised. Where pressure cannot be produced safely on available hardware, distinguish injected resource-policy checks from measured real-device behavior.
 11. **Evidence reporting.** Record exact commands, versions/digests, measured outcomes, creator-reported versus agent-verified results, and limitations on the appropriate task. Documentation-only specification publication does not constitute successful implementation, inference validation, or a new performance result.
 
 ## Out of Scope
 
+- Auto/adaptive processing, parallel stage overlap, and the Sequential/Auto comparison originally proposed in #19.
 - Cross-project reuse of A-roll, automatic edits, timelines, rendering, generated B-roll, destructive cuts, or publishing/submitting videos.
 - Guaranteed viewer emotions, clinical emotion detection, continuous video understanding, or unobserved music/motion/pacing analysis in this first version.
 - Scanning unrelated folders, uploading originals or local indexes, silent model downloads, or cloud inference fallback.
@@ -134,19 +133,18 @@ The native Mac app exposes a Reusable B-roll view and independent Project creati
 
 ## Further Notes
 
-The creator confirmed the design, terminology, testing seam, four-task order, and consolidated scope in this conversation. The glossary and five ADRs capture the ownership, scope, evidence, and processing trade-offs. The design brief retains the 21 individual decisions and twelve acceptance scenarios. GitHub carries authoritative task state; local documents are the reproducible specification snapshot.
+The creator originally confirmed the design, terminology, testing seam, and four-task order; the scope amendment above removes the fourth task. The glossary and five ADRs capture the ownership, scope, evidence, and processing trade-offs. The design brief retains the 21 individual decisions and twelve acceptance scenarios. GitHub carries authoritative task state; local documents are the reproducible specification snapshot.
 
 Existing runtime and real-model evidence are recorded in the completed demo documentation. The multilingual English/Tagalog/Taglish speech change remains approved; accuracy or throughput on additional footage/devices still requires measurement. No new model candidate or inference dependency is selected by this specification.
 
-The historical hackathon planning assumption was 2026-10-10 at 10:00 Asia/Manila. Verify the organizer's authoritative cutoff and whether it still governs the next implementation session before scheduling deadline work, preserving the agreed submission buffer. Creating a specification or implementation issues does not authorize submission. Do not claim all four increments fit the historical remaining time without estimates and evidence.
+The historical hackathon planning assumption was 2026-10-10 at 10:00 Asia/Manila. Verify the organizer's authoritative cutoff and whether it still governs the next implementation session before scheduling deadline work, preserving the agreed submission buffer. Creating a specification or implementation issues does not authorize submission. Do not claim the remaining work fits the historical remaining time without estimates and evidence.
 
-The parent issue is a specification, not an independently claimable implementation task. The first task has no implementation blocker; the remaining three are natively blocked in the agreed sequence. Start only after reading current issue comments, checking blockers/claims, and claiming one task. Leave progress, validation, branch/commit, and remaining-work handoffs. Close tasks through validated integration, and close the parent only after all accepted behavior is demonstrated.
+The parent issue is a specification, not an independently claimable implementation task. The first task has no implementation blocker; the following two are natively blocked in the agreed sequence. Start only after reading current issue comments, checking blockers/claims, and claiming one task. Leave progress, validation, branch/commit, and remaining-work handoffs. Close tasks through validated integration, and close the parent only after all accepted behavior is demonstrated.
 
 | Order | Native sub-issue | Blocked by |
 | --- | --- | --- |
 | 1 | [#16 — Share library sources across Projects and review Segment roles](https://github.com/angelobaricante/clipco/issues/16) | None; check claims |
 | 2 | [#17 — Discover reusable B-roll across the library with grounded emotional tone](https://github.com/angelobaricante/clipco/issues/17) | #16 |
 | 3 | [#18 — Create Projects easily and import dropped footage through a recoverable queue](https://github.com/angelobaricante/clipco/issues/18) | #17 |
-| 4 | [#19 — Adapt indexing concurrency to device resources with measured Auto processing](https://github.com/angelobaricante/clipco/issues/19) | #18 |
 
 The confirmed design, updated glossary, and ADRs are available on the [design/specification branch](https://github.com/angelobaricante/clipco/tree/codex/reusable-footage-design). Read that approved vocabulary until these documents are integrated into the implementation baseline.

@@ -53,6 +53,9 @@ Queued work to prepare or enrich a Source clip's footage context, with progress 
 Descriptions, speech, source references, and relevant relationships that help someone understand recorded material. Descriptions are interpretations of the footage, rather than a guarantee that every detail has been captured.
 _Avoid_: Full understanding
 
+**Footage discovery**:
+Finding source-grounded Segments that serve an intended video, including its main explanation, relevant spoken corrections, and supporting imagery.
+
 **Repeated take**:
 Another recorded attempt to express substantially the same point. Repetition alone does not determine which attempt the creator prefers.
 

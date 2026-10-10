@@ -2,6 +2,10 @@
 
 Status: all 21 decisions and the consolidated implementation brief confirmed by the creator on 2026-10-10 (Asia/Manila). Published through the requested to-spec workflow as [specification #15](https://github.com/angelobaricante/clipco/issues/15), with implementation tasks #16–19. No application behavior has changed. This extends the completed MVP without rewriting its historical specification or evidence.
 
+## Scope amendment — 2026-10-10
+
+The creator removed Auto/adaptive processing (#19) from MVP scope and accepted MCP context quality as the next priority. The historical decisions and starting-point findings below describe the original design; decisions 6 and 21, the Auto paragraph, Task 4, and acceptance scenario 12 are superseded by this amendment. Current implementation scope is #16 → #17 → #18, with Sequential processing and the recoverable queue retained. See the [current specification](../reusable-footage-spec.md) and [context-quality discussion](mcp-context-quality-planning.md).
+
 ## Requested direction
 
 The creator wants B-roll retrieval to consider useful footage outside the current Project, including footage that supports the intended emotion. A-roll should stay associated with its content idea. They also want drag-and-drop import of clips and folders, easier Project creation, and faster processing on capable devices while preserving sequential processing on constrained devices.
