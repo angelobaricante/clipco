@@ -3,12 +3,30 @@ import SwiftUI
 @main
 struct ClipcoApp: App {
     @State private var model = AppModel()
+    // App-owned state: opening another window or returning to the app never replays the splash.
+    @State private var showsLaunchSplash = true
 
     var body: some Scene {
         WindowGroup("Clipco") {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 560)
+                .disabled(showsLaunchSplash)
+                .accessibilityHidden(showsLaunchSplash)
+                .overlay {
+                    if showsLaunchSplash {
+                        LaunchSplash { animated in
+                            if animated {
+                                withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.18)) {
+                                    showsLaunchSplash = false
+                                }
+                            } else {
+                                showsLaunchSplash = false
+                            }
+                        }
+                        .transition(.opacity)
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     model.stopRunner()
                 }
@@ -68,6 +86,84 @@ struct ClipcoApp: App {
                 Button("Check Original Files") { Task { await model.checkSources() } }
                     .disabled(!model.hasScope || model.activity != nil || model.isCheckingSources)
             }
+        }
+    }
+}
+
+/// A bounded visual welcome, independent of worker and model readiness.
+/// The real workspace is mounted underneath, so loading proceeds during the reveal.
+struct LaunchSplash: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var revealed = false
+    let dismiss: (_ animated: Bool) -> Void
+
+    private var ink: Color {
+        colorScheme == .dark ? .white : Color(red: 14 / 255, green: 13 / 255, blue: 12 / 255)
+    }
+
+    private var paper: Color {
+        colorScheme == .dark ? Color(red: 14 / 255, green: 13 / 255, blue: 12 / 255)
+            : Color(red: 247 / 255, green: 246 / 255, blue: 242 / 255)
+    }
+
+    var body: some View {
+        ZStack {
+            paper
+            if !reduceTransparency {
+                RadialGradient(colors: [ink.opacity(0.045), .clear],
+                               center: .center, startRadius: 60, endRadius: 380)
+                    .accessibilityHidden(true)
+            }
+
+            ZStack {
+                // Three quiet frames echo the mark's facets and the footage browser.
+                ForEach(0..<3) { index in
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(ink.opacity(0.07), lineWidth: 1)
+                        .frame(width: 440, height: 250)
+                        .rotationEffect(.degrees(Double(index - 1) * 9))
+                        .scaleEffect(reduceMotion || revealed ? 1 : 0.96)
+                        .opacity(revealed ? 1 : 0)
+                }
+                .accessibilityHidden(true)
+
+                VStack(spacing: 20) {
+                    Image("ClipcoLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 310, height: 104)
+                        .foregroundStyle(ink)
+                        .accessibilityLabel("Clipco")
+                    Text("Your clips, in context.")
+                        .font(.system(.title3, design: .default))
+                        .foregroundStyle(ink.opacity(0.65))
+                }
+                .scaleEffect(reduceMotion || revealed ? 1 : 0.97)
+                .opacity(revealed ? 1 : 0)
+            }
+
+            VStack {
+                Spacer()
+                Button("Open Workspace") { dismiss(false) }
+                    .keyboardShortcut(.cancelAction)
+                    .controlSize(.small)
+                    .help("Skip the welcome and open your workspace (Escape)")
+                    .padding(.bottom, 28)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            withAnimation(reduceMotion ? .linear(duration: 0.15)
+                          : .timingCurve(0.23, 1, 0.32, 1, duration: 0.28)) {
+                revealed = true
+            }
+            // Cancellation when the window closes or Skip is pressed must not dismiss a later view.
+            do { try await Task.sleep(for: .milliseconds(reduceMotion ? 250 : 850)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            dismiss(true)
         }
     }
 }
