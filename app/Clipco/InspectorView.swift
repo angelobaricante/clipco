@@ -320,7 +320,11 @@ struct ContextSection: View {
         ForEach(clip.segments) { segment in
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(segment.label).font(.headline)
+                    if clip.segments.count > 1 || segment.label != clip.displayLabel {
+                        Text(segment.label).font(.headline)
+                    } else {
+                        Text("Segment").font(.caption).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Button("\(segment.start.timecode)–\(segment.end.timecode)") {
                         Task { await model.openPlayer(clip.id, at: segment.start) }
@@ -331,12 +335,17 @@ struct ContextSection: View {
                         .accessibilityLabel("Play from \(segment.start.timecode) to \(segment.end.timecode)")
                 }
                 EvidenceGroup(title: "Model interpretation", symbol: "sparkles",
-                              note: segment.interpretation.model) {
-                    Text(segment.interpretation.text)
+                              note: nil) {
+                    Text(segment.interpretation.text).textSelection(.enabled)
                 }
-                SegmentRolePicker(segment: segment)
-                SegmentToneView(segment: segment)
-                DisclosureGroup("Sampled frame observations (\(segment.observations.count) stills)") {
+                VStack(alignment: .leading, spacing: 12) {
+                    SegmentRolePicker(segment: segment)
+                    SegmentToneView(segment: segment)
+                }
+                .padding(12)
+                .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 8))
+                SegmentAnalysisDetails(segment: segment)
+                DisclosureGroup("Sampled frames (\(segment.observations.count))") {
                 EvidenceGroup(title: "Sampled frame observations", symbol: "photo",
                               note: "\(segment.observations.count) still frames, not continuous coverage") {
                     ForEach(segment.observations, id: \.frame.id) { obs in
@@ -398,23 +407,29 @@ struct SegmentRolePicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Picker("Role", selection: Binding(
-                get: { segment.role.creator ?? "" },
-                set: { choice in Task { await model.setRole(choice.isEmpty ? nil : choice, for: segment) } })) {
-                Text("Suggested: \(SegmentRole.name(segment.role.suggested))").tag("")
-                Divider()
-                ForEach(SegmentRole.choices, id: \.self) { Text(SegmentRole.name($0)).tag($0) }
+            HStack {
+                Text("Footage role")
+                Spacer()
+                Menu {
+                    Picker("Footage role", selection: Binding(
+                        get: { segment.role.creator ?? "" },
+                        set: { choice in Task { await model.setRole(choice.isEmpty ? nil : choice, for: segment) } })) {
+                        Text("Use Suggested (\(SegmentRole.name(segment.role.suggested)))").tag("")
+                        Divider()
+                        ForEach(SegmentRole.choices, id: \.self) { Text(SegmentRole.name($0)).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Text(SegmentRole.name(segment.role.effective))
+                }
+                .fixedSize()
+                .disabled(model.pendingUpdates.contains("role:\(segment.id)"))
+                .accessibilityLabel("Footage role from \(segment.start.timecode) to \(segment.end.timecode)")
+                .accessibilityValue(SegmentRole.name(segment.role.effective))
             }
-            .pickerStyle(.menu)
-            .disabled(model.pendingUpdates.contains("role:\(segment.id)"))
-            .accessibilityLabel("Footage role from \(segment.start.timecode) to \(segment.end.timecode)")
             if model.pendingUpdates.contains("role:\(segment.id)") { ProgressView("Saving role…").controlSize(.small) }
-            DisclosureGroup("Role basis") {
-            Text(segment.role.creator == nil ? segment.role.basis
-                                             : "Set by you. Suggested \(SegmentRole.name(segment.role.suggested)): "
-                                               + segment.role.basis)
+            Text(segment.role.creator == nil ? "Suggested" : "Set by you")
                 .font(.caption).foregroundStyle(.secondary)
-            }
             if segment.role.effective == "mixed" || segment.role.effective == "needs_review" {
                 Text("Not offered for reuse until you choose a role.").font(.caption).foregroundStyle(.orange)
             }
@@ -429,13 +444,11 @@ struct SegmentToneView: View {
 
     var body: some View {
         let tone = segment.tone
-        EvidenceGroup(title: "Emotional tone", symbol: "heart.text.square",
-                      note: tone.model.map { "interpreted by \($0) from sampled evidence" }) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(tone.summary).fontWeight(tone.state == "creator" ? .semibold : .regular)
-                    .foregroundStyle(tone.state == "not_analyzed" ? .secondary : .primary)
+                Text("Emotional tone")
                 Spacer()
-                Menu("Tones") {
+                Menu("Edit…") {
                     ForEach(SegmentTone.vocabulary, id: \.self) { name in
                         Toggle(name.capitalized, isOn: Binding(
                             get: { tone.tones.contains(name) },
@@ -449,27 +462,79 @@ struct SegmentToneView: View {
                     Button("Use Suggested") { Task { await model.setTones(nil, for: segment) } }
                         .disabled(tone.creator == nil)
                 }
+                .fixedSize()
                 .disabled(model.pendingUpdates.contains("tone:\(segment.id)"))
-                .accessibilityLabel("Emotional tones from \(segment.start.timecode) to \(segment.end.timecode)")
+                .accessibilityLabel("Edit emotional tones from \(segment.start.timecode) to \(segment.end.timecode)")
             }
-            if model.pendingUpdates.contains("tone:\(segment.id)") { ProgressView("Saving tones…").controlSize(.small) }
-            DisclosureGroup("Tone evidence and limitations") {
-            if tone.creator != nil {
-                Text("Set by you. Suggested: " + (tone.suggested.isEmpty ? "none"
-                                                  : tone.suggested.map(\.tone).joined(separator: ", ")))
+            Text(tone.summary)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(tone.state == "not_analyzed" ? .secondary : .primary)
+            if tone.state != "not_analyzed" {
+                Text(tone.creator != nil ? "Set by you" : "Suggested · depends on the story")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(tone.suggested, id: \.tone) { s in
-                Text("\(s.tone.capitalized): \(s.explanation)").font(.caption)
+            if model.pendingUpdates.contains("tone:\(segment.id)") { ProgressView("Saving tones…").controlSize(.small) }
+        }
+    }
+}
+
+/// Supporting reasons and provenance stay available without competing with the review controls.
+private struct SegmentAnalysisDetails: View {
+    let segment: Segment
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Analysis details", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                if let model = segment.interpretation.model {
+                    EvidenceGroup(title: "Summary model", symbol: "sparkles", note: nil) {
+                        Text(model).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                EvidenceGroup(title: "Suggested role", symbol: "film", note: nil) {
+                    Text(SegmentRole.name(segment.role.suggested)).font(.caption.weight(.medium))
+                    Text(segment.role.basis).font(.caption)
+                }
+                EvidenceGroup(title: "Suggested tone", symbol: "heart.text.square", note: nil) {
+                    if let model = segment.tone.model {
+                        Text("Interpreted by \(model) from sampled evidence")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if segment.tone.state == "not_analyzed" {
+                        Text("Not analyzed").font(.caption).foregroundStyle(.secondary)
+                    } else if segment.tone.suggested.isEmpty {
+                        Text("No supported tone").font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(segment.tone.suggested, id: \.tone) { suggestion in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(suggestion.tone.capitalized).font(.caption.weight(.semibold))
+                            Text(suggestion.explanation).font(.caption)
+                        }
+                    }
+                }
+                if !segment.tone.connotations.isEmpty {
+                    EvidenceGroup(title: "Possible meanings", symbol: "lightbulb", note: nil) {
+                        ForEach(segment.tone.connotations, id: \.idea) { connotation in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(connotation.idea).font(.caption.weight(.semibold))
+                                Text(connotation.explanation).font(.caption)
+                            }
+                        }
+                    }
+                }
+                if let depicted = segment.tone.depictedEmotion, !depicted.isEmpty {
+                    EvidenceGroup(title: "Emotion shown by a person", symbol: "person", note: nil) {
+                        Text(depicted).font(.caption)
+                    }
+                }
+                if !segment.tone.limitations.isEmpty {
+                    EvidenceGroup(title: "Limitations", symbol: "info.circle", note: nil) {
+                        Text(segment.tone.limitations).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
-            ForEach(tone.connotations, id: \.idea) { c in
-                Text("Could stand for “\(c.idea)”: \(c.explanation)").font(.caption)
-            }
-            if let depicted = tone.depictedEmotion, !depicted.isEmpty {
-                Text("Shown by a person: \(depicted)").font(.caption).foregroundStyle(.secondary)
-            }
-            Text(tone.limitations).font(.caption).foregroundStyle(.secondary)
-            }
+            .padding(.top, 8)
+            .textSelection(.enabled)
         }
     }
 }
