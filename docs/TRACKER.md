@@ -22,13 +22,12 @@ The creator confirmed all 21 decisions and the consolidated implementation brief
 
 | Order | Issue | Depends on |
 | --- | --- | --- |
-| Spec | [#15 — Reusable B-roll library and adaptive indexing](https://github.com/angelobaricante/clipco/issues/15) | Confirmed design; not independently claimable |
+| Spec | [#15 — Reusable B-roll library and recoverable imports](https://github.com/angelobaricante/clipco/issues/15) | Confirmed design; not independently claimable |
 | 1 | [#16 — Shared library sources and Segment roles](https://github.com/angelobaricante/clipco/issues/16) | None; check active claims |
 | 2 | [#17 — Grounded emotional tone and reusable retrieval](https://github.com/angelobaricante/clipco/issues/17) | #16 |
 | 3 | [#18 — Project creation, native drops, and recoverable queue](https://github.com/angelobaricante/clipco/issues/18) | #17 |
-| 4 | [#19 — Measured resource-adaptive processing](https://github.com/angelobaricante/clipco/issues/19) | #18 |
 
-Tasks #16–19 are native sub-issues of #15, with native blocking dependencies in this order. All are specified with `ready-for-agent`; only #16 is initially unblocked. Do not reopen completed MVP tasks as a shortcut or claim the parent as implementation work.
+Tasks #16–18 are native sub-issues of #15, with native blocking dependencies in this order. On 2026-10-10, the creator removed #19 (Auto/adaptive processing) from MVP scope; it is closed as not planned and removed from the active chain. Sequential processing and the recoverable queue remain. #16, #17, and #18 are closed; the recoverable queue is integrated. Historical verification limitations remain in the issue handoffs. The next priority is MCP context quality for the approved editing-agent discovery workflow; its implementation design is still under discussion. Do not reopen completed MVP tasks as a shortcut or claim the parent as implementation work.
 
 ## Start a session
 
@@ -54,7 +53,7 @@ When the task's acceptance criteria are satisfied, link its PR to the issue. Clo
 
 ## Durable context
 
-- Next improvement cycle: [Reusable footage specification](reusable-footage-spec.md), [confirmed design](design/reusable-footage-planning.md), and issues #15–19. The completed MVP tasks above remain historical.
+- Next improvement cycle: [Reusable footage specification](reusable-footage-spec.md), [confirmed design](design/reusable-footage-planning.md), and issues #15–18. The [MCP context-quality discussion](design/mcp-context-quality-planning.md) records the accepted priority and open design decisions. The completed MVP tasks above remain historical.
 
 - Product requirements: live parent spec plus the committed spec snapshot.
 - Domain terms: GLOSSARY.md.
