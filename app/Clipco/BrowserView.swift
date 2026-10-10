@@ -8,6 +8,8 @@ struct BrowserView: View {
 
     var body: some View {
         browser
+            // Empty states have an intrinsic height; expand before adding the browser header.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .top, spacing: 0) {
                 if model.hasScope, !model.showingLibrary, model.trimmedQuery.isEmpty {
                     HStack {
@@ -52,8 +54,8 @@ struct BrowserView: View {
             ContentUnavailableView {
                 Label("No Footage Yet", systemImage: "film")
             } description: {
-                Text("Drop videos or folders here, or import them, to transcribe speech and describe sampled "
-                     + "frames on this Mac. Analysis is queued and runs one clip at a time.")
+                Text("Drop videos or folders here, or import footage to get started. "
+                     + "Originals stay where they are.")
             } actions: {
                 Button("Import Footage…") { model.showImport = true }
             }
